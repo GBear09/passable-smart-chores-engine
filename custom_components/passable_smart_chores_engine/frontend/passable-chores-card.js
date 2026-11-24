@@ -1,0 +1,3455 @@
+/**
+ * Passable Chores Card
+ * Bundled companion card for Passable Smart Chores Engine
+ * https://github.com/GBear09/passable-smart-chores-engine
+ *
+ * Version 1.0.0 - Passable Suite Summary Card + Kid Columns Board + 4-Tab Command Center
+ */
+
+const CARD_VERSION = "1.0.0";
+const ENGINE_DOMAIN = "passable_smart_chores_engine";
+
+const LitElement = Object.getPrototypeOf(
+  customElements.get("ha-panel-lovelace") ||
+    customElements.get("hui-entities-card") ||
+    customElements.get("hui-masonry-view") ||
+    customElements.get("hc-main")
+);
+const html = LitElement.prototype.html;
+const css = LitElement.prototype.css;
+const svg =
+  LitElement.prototype.svg ||
+  ((strings, ...values) => {
+    const result = html(strings, ...values);
+    if (result && typeof result === "object") {
+      return Object.assign({}, result, { _$litType$: 2, type: "svg" });
+    }
+    return result;
+  });
+
+console.info(
+  `%c PASSABLE-CHORES-CARD %c v${CARD_VERSION} IS LOADED `,
+  "color: #ffffff; background: #10b981; font-weight: bold; padding: 2px 6px; border-radius: 4px 0 0 4px;",
+  "color: #047857; background: #d1fae5; font-weight: bold; padding: 2px 6px; border-radius: 0 4px 4px 0;"
+);
+
+const MODAL_TABS = [
+  { id: "chores", label: "Chores", icon: "mdi:clipboard-check-outline" },
+  { id: "kids", label: "Kids & Trust", icon: "mdi:account-child-circle" },
+  { id: "unlocks", label: "Unlocks & Rewards", icon: "mdi:television-lock" },
+  { id: "setup", label: "Activity & Setup", icon: "mdi:cog-outline" },
+];
+
+const DAYS_LIST = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DAYS_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
+
+const KID_AVATAR_PRESETS = ["👧", "👦", "🧒", "👶", "🦄", "🦖", "🚀", "⚽", "🎨", "🐱"];
+const KID_COLOR_PRESETS = [
+  "#8E24AA",
+  "#039BE5",
+  "#4285F4",
+  "#009688",
+  "#f59e0b",
+  "#22c55e",
+  "#ec4899",
+  "#6366f1",
+];
+
+const CHORE_EMOJI_PRESETS = [
+  "🛏️", "🪥", "🧹", "🐕", "🍽️", "🎒", "🧺", "🗑️", "📚", "🧸", "🧼", "🫧", "🌱", "🎹", "🚿", "🥣",
+];
+
+const CHORE_STARTER_TEMPLATES = [
+  { name: "Make Bed", emoji: "🛏️", tier: "required", schedule_type: "daily", assignment_mode: "each", points: 5 },
+  { name: "Brush Teeth", emoji: "🪥", tier: "required", schedule_type: "daily", assignment_mode: "each", points: 5 },
+  { name: "Pack Backpack", emoji: "🎒", tier: "required", schedule_type: "school_days", assignment_mode: "each", points: 5 },
+  { name: "Clear Dishes", emoji: "🍽️", tier: "required", schedule_type: "daily", assignment_mode: "each", points: 5 },
+  { name: "Clean Room", emoji: "🧹", tier: "required", schedule_type: "weekly", assignment_mode: "each", points: 15 },
+  { name: "Feed Pet", emoji: "🐕", tier: "required", schedule_type: "daily", assignment_mode: "rotate_weekly", points: 10 },
+  { name: "Put Away Laundry", emoji: "🧺", tier: "required", schedule_type: "weekends", assignment_mode: "each", points: 10 },
+  { name: "Vacuum Playroom", emoji: "🫧", tier: "bonus", schedule_type: "daily", assignment_mode: "up_for_grabs", points: 20 },
+];
+
+const REWARD_EMOJI_PRESETS = ["📺", "🎮", "🍦", "🎬", "💵", "🍕", "⏰", "🎉"];
+
+function hexToRgba(hex, alpha) {
+  const clean = String(hex || "#039BE5").replace("#", "").trim();
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return `rgba(3, 155, 229, ${alpha})`;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+class PassableChoresCard extends LitElement {
+  static getConfigElement() {
+    return document.createElement("passable-chores-card-editor");
+  }
+
+  static getStubConfig() {
+    return {
+      title: "Family Chores",
+      subtitle: "Smart Chores, Streaks & Screen Unlocks",
+      display_mode: "summary",
+      layout: "board",
+      tile_size: "large",
+      show_header: false,
+      show_summary_strip: true,
+      show_footer_strip: true,
+      hide_inactive_kids: true,
+      kids_filter: [],
+      require_pin: "auto",
+      hide_admin_setup: false,
+    };
+  }
+
+  static get properties() {
+    return {
+      hass: { attribute: false },
+      config: { state: true },
+      _wsData: { state: true },
+      _wsError: { state: true },
+      _drawerMode: { state: true },
+      _selectedRewardKidId: { state: true },
+      _selectedBountyKidId: { state: true },
+      _celebratingKids: { state: true },
+      _modalOpen: { state: true },
+      _modalTab: { state: true },
+      _choreFilterKid: { state: true },
+      _editingChoreId: { state: true },
+      _choreDraft: { state: true },
+      _editingKidId: { state: true },
+      _kidDraft: { state: true },
+      _editingRuleId: { state: true },
+      _ruleDraft: { state: true },
+      _editingRewardId: { state: true },
+      _rewardDraft: { state: true },
+      _setupSubTab: { state: true },
+      _secCurrentPin: { state: true },
+      _secNewPin: { state: true },
+      _secPinEnabled: { state: true },
+      _secReqApprovals: { state: true },
+      _secReqSettings: { state: true },
+      _pinModalOpen: { state: true },
+      _pinInput: { state: true },
+      _pinError: { state: true },
+      _pinUnlockedUntil: { state: true },
+      _toastMsg: { state: true },
+      _tickNow: { state: true },
+    };
+  }
+
+  constructor() {
+    super();
+    this._wsData = null;
+    this._wsError = null;
+    this._wsUnsub = null;
+    this._wsSubscribing = false;
+    this._drawerMode = null;
+    this._selectedRewardKidId = null;
+    this._selectedBountyKidId = null;
+    this._celebratingKids = {};
+    this._prevKidAllDone = {};
+    this._modalOpen = false;
+    this._modalTab = "chores";
+    this._choreFilterKid = "all";
+    this._editingChoreId = null;
+    this._choreDraft = this._emptyChoreDraft();
+    this._editingKidId = null;
+    this._kidDraft = this._emptyKidDraft();
+    this._editingRuleId = null;
+    this._ruleDraft = this._emptyRuleDraft();
+    this._editingRewardId = null;
+    this._rewardDraft = this._emptyRewardDraft();
+    this._setupSubTab = "settings";
+
+    this._secCurrentPin = "";
+    this._secNewPin = "";
+    this._secPinEnabled = false;
+    this._secReqApprovals = true;
+    this._secReqSettings = true;
+    this._secSynced = false;
+
+    this._pinModalOpen = false;
+    this._pinInput = "";
+    this._pinError = null;
+    this._pinUnlockedUntil = 0;
+    this._pendingProtectedFn = null;
+
+    this._toastMsg = null;
+    this._tickNow = Date.now();
+    this._countdownInterval = null;
+    this._toastTimer = null;
+    this._closeModalTimer = null;
+    this._celebrationTimers = {};
+
+    this._touchStartY = undefined;
+    this._touchStartX = undefined;
+    this._touchCurrentY = undefined;
+    this._touchTarget = null;
+    this._touchInScroll = false;
+    this._touchDragging = false;
+    this._touchLockedHorizontal = false;
+    this._swipeResetTimer = null;
+    this._scrollLockedElements = null;
+    this._scrollGuardOverlay = null;
+    this._guardTouchY = 0;
+    this._guardTouchX = 0;
+    this._onOverlayWheel = this._onOverlayWheel.bind(this);
+    this._onOverlayTouchStart = this._onOverlayTouchStart.bind(this);
+    this._onOverlayTouchMove = this._onOverlayTouchMove.bind(this);
+    this._onKeyDown = (ev) => {
+      if (ev.key === "Escape") {
+        if (this._pinModalOpen) this._closePinModal();
+        else if (this._modalOpen) this._closeModal();
+      }
+    };
+  }
+
+  _emptyKidDraft() {
+    return {
+      kid_id: null,
+      name: "",
+      avatar: "👧",
+      accent_color: "#8E24AA",
+      enabled: true,
+      trust_mode: "inherit",
+    };
+  }
+
+  _emptyChoreDraft() {
+    return {
+      chore_id: null,
+      name: "",
+      emoji: "🧹",
+      image: "",
+      enabled: true,
+      tier: "required",
+      schedule_type: "daily",
+      custom_days: ["mon", "wed", "fri"],
+      weekly_due_day: "",
+      weekly_flexible: true,
+      assignment_mode: "each",
+      assigned_kids: [],
+      points: 5,
+      trust_mode: "inherit",
+    };
+  }
+
+  _emptyRuleDraft() {
+    return {
+      rule_id: null,
+      name: "",
+      enabled: true,
+      scope: "shared",
+      kid_id: "",
+      shared_mode: "any_active_kid",
+      target_mode: "passable_screen_time",
+      screen_time_device_id: "",
+      target_entity: "",
+      nintendo_bonus_minutes: 60,
+      lock_on_reset: true,
+      re_lock_if_uncompleted: true,
+      respect_screen_time_schedules: true,
+    };
+  }
+
+  _emptyRewardDraft() {
+    return {
+      reward_id: null,
+      name: "",
+      emoji: "🎁",
+      cost: 50,
+      reward_type: "parent_fulfilled",
+      auto_approve: false,
+      action_kind: "screen_time_timer",
+      device_id: "all",
+      entity_id: "",
+      duration_minutes: 20,
+      service: "",
+    };
+  }
+
+  setConfig(config) {
+    if (!config) throw new Error("Invalid configuration");
+    const displayMode = config.display_mode === "full" ? "full" : "summary";
+    const defaultShowHeader = displayMode === "full";
+    const layout = ["board", "tiles", "rows", "rings"].includes(config.layout)
+      ? config.layout
+      : "board";
+    this.config = {
+      title: config.title !== undefined ? config.title : "Family Chores",
+      subtitle:
+        config.subtitle !== undefined
+          ? config.subtitle
+          : "Smart Chores, Streaks & Screen Unlocks",
+      display_mode: displayMode,
+      layout,
+      tile_size: config.tile_size === "compact" ? "compact" : "large",
+      show_header:
+        config.show_header !== undefined
+          ? config.show_header !== false
+          : defaultShowHeader,
+      show_summary_strip: config.show_summary_strip !== false,
+      show_footer_strip: config.show_footer_strip !== false,
+      hide_inactive_kids: config.hide_inactive_kids !== false,
+      kids_filter: Array.isArray(config.kids_filter) ? config.kids_filter : [],
+      require_pin: config.require_pin !== undefined ? config.require_pin : "auto",
+      hide_admin_setup: config.hide_admin_setup === true,
+      ...config,
+    };
+  }
+
+  getCardSize() {
+    if (this.config?.display_mode === "full") return 8;
+    const layout = this.config?.layout || "board";
+    if (layout === "rings" || layout === "tiles") return 3;
+    return 5;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener("keydown", this._onKeyDown);
+    if (this.hass && !this._wsUnsub && !this._wsSubscribing) {
+      this._subscribeEngine();
+    }
+    this._syncCountdownTimer();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("keydown", this._onKeyDown);
+    this._detachOverlayScrollGuard();
+    this._unlockBackgroundScroll();
+    this._unsubscribeEngine();
+    clearInterval(this._countdownInterval);
+    this._countdownInterval = null;
+    clearTimeout(this._toastTimer);
+    clearTimeout(this._closeModalTimer);
+    clearTimeout(this._swipeResetTimer);
+    Object.values(this._celebrationTimers).forEach((t) => clearTimeout(t));
+  }
+
+  updated(changedProps) {
+    super.updated(changedProps);
+    if (
+      changedProps.has("hass") &&
+      this.hass &&
+      !this._wsUnsub &&
+      !this._wsSubscribing &&
+      !this._wsData
+    ) {
+      this._subscribeEngine();
+    }
+    if (
+      (this._modalOpen && this.config?.display_mode !== "full") ||
+      this._pinModalOpen
+    ) {
+      this._attachOverlayScrollGuard();
+    } else {
+      this._detachOverlayScrollGuard();
+    }
+  }
+
+  shouldUpdate(changedProps) {
+    if (!changedProps.has("hass")) return true;
+    for (const key of changedProps.keys()) {
+      if (key !== "hass") return true;
+    }
+    const oldHass = changedProps.get("hass");
+    const newHass = this.hass;
+    if (!oldHass || !newHass || !oldHass.states || !newHass.states) return true;
+    return oldHass.states["sensor.passable_chores_summary"] !== newHass.states["sensor.passable_chores_summary"];
+  }
+
+  // =========================================================================
+  // WEBSOCKET SUBSCRIPTION & COUNTDOWN GATING
+  // =========================================================================
+
+  async _subscribeEngine() {
+    if (!this.hass || this._wsSubscribing) return;
+    this._wsSubscribing = true;
+    try {
+      this._wsUnsub = await this.hass.connection.subscribeMessage(
+        (snapshot) => this._handleSnapshot(snapshot),
+        { type: `${ENGINE_DOMAIN}/subscribe` }
+      );
+      this._wsError = null;
+    } catch (err) {
+      this._wsError = err?.message || "Failed to connect to Passable Smart Chores Engine";
+    } finally {
+      this._wsSubscribing = false;
+    }
+  }
+
+  _unsubscribeEngine() {
+    if (typeof this._wsUnsub === "function") {
+      try {
+        this._wsUnsub();
+      } catch (_e) {}
+    }
+    this._wsUnsub = null;
+  }
+
+  _handleSnapshot(snapshot) {
+    if (!snapshot) return;
+
+    // Detect newly completed 100% kids for celebration burst
+    const nextKids = snapshot.kids || [];
+    const hadBaseline = Object.keys(this._prevKidAllDone).length > 0;
+    nextKids.forEach((kid) => {
+      const wasDone = this._prevKidAllDone[kid.kid_id];
+      if (
+        hadBaseline &&
+        wasDone === false &&
+        kid.is_all_done_today &&
+        snapshot.settings?.celebrations_enabled !== false
+      ) {
+        this._triggerCelebration(kid.kid_id);
+      }
+      this._prevKidAllDone[kid.kid_id] = Boolean(kid.is_all_done_today);
+    });
+
+    this._wsData = snapshot;
+    this._wsError = null;
+
+    if (!this._secSynced && snapshot.security) {
+      this._secPinEnabled = Boolean(snapshot.security.pin_enabled);
+      this._secReqApprovals = snapshot.security.require_pin_for_approvals !== false;
+      this._secReqSettings = snapshot.security.require_pin_for_settings !== false;
+      this._secSynced = true;
+    }
+
+    if (!this._selectedRewardKidId && nextKids.length > 0) {
+      const firstActive = nextKids.find((k) => k.enabled) || nextKids[0];
+      this._selectedRewardKidId = firstActive.kid_id;
+      this._selectedBountyKidId = firstActive.kid_id;
+    }
+
+    this._syncCountdownTimer();
+  }
+
+  _triggerCelebration(kidId) {
+    clearTimeout(this._celebrationTimers[kidId]);
+    this._celebratingKids = { ...this._celebratingKids, [kidId]: true };
+    this._celebrationTimers[kidId] = setTimeout(() => {
+      const next = { ...this._celebratingKids };
+      delete next[kidId];
+      this._celebratingKids = next;
+    }, 2600);
+  }
+
+  _hasActiveUndoCountdown() {
+    const now = Date.now();
+    for (const kid of this._wsData?.kids || []) {
+      for (const item of kid.board || []) {
+        if (item.undo_expires_at && new Date(item.undo_expires_at).getTime() > now) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  _syncCountdownTimer() {
+    const needsTick = this._hasActiveUndoCountdown();
+    if (needsTick && !this._countdownInterval) {
+      this._tickNow = Date.now();
+      this._countdownInterval = setInterval(() => {
+        this._tickNow = Date.now();
+        if (!this._hasActiveUndoCountdown()) {
+          clearInterval(this._countdownInterval);
+          this._countdownInterval = null;
+        }
+      }, 1000);
+    } else if (!needsTick && this._countdownInterval) {
+      clearInterval(this._countdownInterval);
+      this._countdownInterval = null;
+    }
+  }
+
+  _getUndoRemainingSecs(item) {
+    if (!item?.undo_expires_at) return 0;
+    const diff = Math.ceil((new Date(item.undo_expires_at).getTime() - this._tickNow) / 1000);
+    return diff > 0 ? diff : 0;
+  }
+
+  // =========================================================================
+  // HELPERS, HAPTICS, TOASTS & PARENTAL PIN
+  // =========================================================================
+
+  _fireHaptic(type = "light") {
+    this.dispatchEvent(
+      new CustomEvent("haptic", { detail: type, bubbles: true, composed: true })
+    );
+  }
+
+  _showToast(msg) {
+    this._toastMsg = msg;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => {
+      this._toastMsg = null;
+    }, 2600);
+  }
+
+  _isPinSessionUnlocked() {
+    return Date.now() < this._pinUnlockedUntil;
+  }
+
+  _requiresPin(actionKind) {
+    if (this.config?.require_pin === false) return false;
+    const sec = this._wsData?.security;
+    if (!sec?.pin_enabled) return false;
+    if (sec.bypass_for_ha_admins && this.hass?.user?.is_admin && this.config?.require_pin !== true) {
+      return false;
+    }
+    if (this._isPinSessionUnlocked()) return false;
+    if (actionKind === "approvals") return sec.require_pin_for_approvals !== false;
+    if (actionKind === "settings") return sec.require_pin_for_settings !== false;
+    return true;
+  }
+
+  _runProtectedAction(actionKind, fn) {
+    if (!this._requiresPin(actionKind)) {
+      return fn();
+    }
+    this._pendingProtectedFn = fn;
+    this._pinInput = "";
+    this._pinError = null;
+    this._pinModalOpen = true;
+    this._lockBackgroundScroll();
+  }
+
+  _closePinModal() {
+    this._pinModalOpen = false;
+    this._pinInput = "";
+    this._pinError = null;
+    this._pendingProtectedFn = null;
+    if (!this._modalOpen) this._unlockBackgroundScroll();
+  }
+
+  _lockPinSession() {
+    this._pinUnlockedUntil = 0;
+    this._showToast("Parent PIN locked");
+  }
+
+  async _submitPinModal() {
+    if (!this._pinInput || this._pinInput.length < 4) {
+      this._pinError = "Enter 4–6 digits";
+      return;
+    }
+    try {
+      const res = await this.hass.callWS({
+        type: `${ENGINE_DOMAIN}/verify_pin`,
+        pin: this._pinInput,
+      });
+      if (!res?.valid) {
+        this._fireHaptic("failure");
+        this._pinError = "Incorrect PIN";
+        this._pinInput = "";
+        return;
+      }
+      this._fireHaptic("success");
+      this._pinUnlockedUntil = Date.now() + 60000;
+      const fn = this._pendingProtectedFn;
+      this._closePinModal();
+      if (fn) await fn();
+    } catch (err) {
+      this._pinError = err?.message || "PIN check failed";
+    }
+  }
+
+  // =========================================================================
+  // CHORE, APPROVAL, REWARD & RULE ACTIONS
+  // =========================================================================
+
+  async _onChoreTileClick(kid, item, ev) {
+    if (ev) ev.stopPropagation();
+    if (!this.hass) return;
+    this._fireHaptic("light");
+
+    if (item.status === "pending") {
+      try {
+        const res = await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/complete_chore`,
+          chore_id: item.chore_id,
+          kid_id: kid.kid_id,
+          by_parent: false,
+        });
+        this._fireHaptic("success");
+        if (res?.status === "waiting_approval") {
+          this._showToast(`Sent to parents for approval ⏳`);
+        }
+      } catch (err) {
+        this._showToast(err?.message || "Could not complete chore");
+      }
+      return;
+    }
+
+    // Completed or Waiting Approval: allow undo during undo window, or parent override
+    const undoLeft = this._getUndoRemainingSecs(item);
+    if (undoLeft > 0 || item.status === "waiting_approval") {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/uncomplete_chore`,
+          chore_id: item.chore_id,
+          kid_id: kid.kid_id,
+        });
+        this._showToast(`Reset "${item.name}"`);
+      } catch (err) {
+        this._showToast(err?.message || "Could not undo");
+      }
+      return;
+    }
+
+    // After undo window expires, require parent PIN if configured to uncheck
+    return this._runProtectedAction("approvals", async () => {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/uncomplete_chore`,
+          chore_id: item.chore_id,
+          kid_id: kid.kid_id,
+        });
+        this._showToast(`Unchecked "${item.name}"`);
+      } catch (err) {
+        this._showToast(err?.message || "Could not uncheck");
+      }
+    });
+  }
+
+  _approveChore(choreId, kidId, ev = null) {
+    if (ev) ev.stopPropagation();
+    return this._runProtectedAction("approvals", async () => {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/approve_chore`,
+          chore_id: choreId,
+          kid_id: kidId,
+        });
+        this._fireHaptic("success");
+        this._showToast("Chore approved!");
+      } catch (err) {
+        this._showToast(err?.message || "Approval failed");
+      }
+    });
+  }
+
+  _rejectChore(choreId, kidId, ev = null) {
+    if (ev) ev.stopPropagation();
+    return this._runProtectedAction("approvals", async () => {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/reject_chore`,
+          chore_id: choreId,
+          kid_id: kidId,
+        });
+        this._fireHaptic("warning");
+        this._showToast("Sent back to Try Again");
+      } catch (err) {
+        this._showToast(err?.message || "Reject failed");
+      }
+    });
+  }
+
+  _approveAllPending(kidId = null) {
+    return this._runProtectedAction("approvals", async () => {
+      try {
+        const res = await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/approve_all_pending`,
+          kid_id: kidId,
+        });
+        this._fireHaptic("success");
+        this._showToast(`Approved ${res?.approved_count || 0} chore(s)`);
+      } catch (err) {
+        this._showToast(err?.message || "Approve all failed");
+      }
+    });
+  }
+
+  async _claimBounty(choreId, kidId) {
+    if (!kidId) {
+      this._showToast("Select a kid first");
+      return;
+    }
+    this._fireHaptic("light");
+    try {
+      const res = await this.hass.callWS({
+        type: `${ENGINE_DOMAIN}/complete_chore`,
+        chore_id: choreId,
+        kid_id: kidId,
+      });
+      this._fireHaptic("success");
+      this._showToast(
+        res?.status === "waiting_approval"
+          ? "Bonus claimed — waiting parent approval"
+          : "Bonus chore claimed!"
+      );
+    } catch (err) {
+      this._showToast(err?.message || "Could not claim bonus");
+    }
+  }
+
+  async _redeemReward(rewardId, kidId) {
+    if (!kidId) {
+      this._showToast("Select a kid first");
+      return;
+    }
+    this._fireHaptic("light");
+    try {
+      const res = await this.hass.callWS({
+        type: `${ENGINE_DOMAIN}/redeem_reward`,
+        reward_id: rewardId,
+        kid_id: kidId,
+      });
+      this._fireHaptic("success");
+      this._showToast(
+        res?.redemption?.status === "approved"
+          ? "Reward redeemed & activated!"
+          : "Reward requested — waiting parent approval"
+      );
+    } catch (err) {
+      this._showToast(err?.message || "Could not redeem reward");
+    }
+  }
+
+  _resolveRedemption(redemptionId, approved) {
+    return this._runProtectedAction("approvals", async () => {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/resolve_redemption`,
+          redemption_id: redemptionId,
+          approved,
+        });
+        this._fireHaptic(approved ? "success" : "warning");
+        this._showToast(approved ? "Reward fulfilled!" : "Reward refunded");
+      } catch (err) {
+        this._showToast(err?.message || "Failed to resolve request");
+      }
+    });
+  }
+
+  _adjustPoints(kidId, delta) {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/adjust_points`,
+          kid_id: kidId,
+          delta,
+          reason: delta > 0 ? "Parent Star Bonus" : "Parent Star Deduction",
+        });
+        this._fireHaptic("light");
+        this._showToast(`${delta > 0 ? "+" : ""}${delta} ⭐ updated`);
+      } catch (err) {
+        this._showToast(err?.message || "Failed to adjust stars");
+      }
+    });
+  }
+
+  // =========================================================================
+  // CRUD ACTIONS (KIDS, CHORES, REWARDS, UNLOCK RULES, SETTINGS)
+  // =========================================================================
+
+  _saveKid() {
+    if (!this._kidDraft.name.trim()) {
+      this._showToast("Enter a child's name");
+      return;
+    }
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/save_kid`,
+          kid_id: this._kidDraft.kid_id,
+          name: this._kidDraft.name.trim(),
+          avatar: this._kidDraft.avatar || "🧒",
+          accent_color: this._kidDraft.accent_color || "#039BE5",
+          enabled: this._kidDraft.enabled !== false,
+          trust_mode: this._kidDraft.trust_mode || "inherit",
+        });
+        this._editingKidId = null;
+        this._kidDraft = this._emptyKidDraft();
+        this._fireHaptic("success");
+        this._showToast("Child profile saved");
+      } catch (err) {
+        this._showToast(err?.message || "Failed to save child");
+      }
+    });
+  }
+
+  _deleteKid(kidId, name) {
+    if (!confirm(`Delete "${name}" and remove their chore assignments?`)) return;
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({ type: `${ENGINE_DOMAIN}/delete_kid`, kid_id: kidId });
+        if (this._drawerMode === kidId) this._drawerMode = null;
+        this._showToast("Child removed");
+      } catch (err) {
+        this._showToast(err?.message || "Delete failed");
+      }
+    });
+  }
+
+  _saveChore() {
+    if (!this._choreDraft.name.trim()) {
+      this._showToast("Enter a chore name");
+      return;
+    }
+    return this._runProtectedAction("settings", async () => {
+      try {
+        const d = this._choreDraft;
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/save_chore`,
+          chore_id: d.chore_id,
+          name: d.name.trim(),
+          emoji: d.emoji || "🧹",
+          image: d.image ? d.image.trim() : null,
+          enabled: d.enabled !== false,
+          tier: d.tier || "required",
+          schedule_type: d.schedule_type || "daily",
+          custom_days: d.custom_days || [],
+          weekly_due_day: d.weekly_due_day || null,
+          weekly_flexible: d.weekly_flexible !== false,
+          assignment_mode: d.assignment_mode || "each",
+          assigned_kids: d.assigned_kids || [],
+          points: Number(d.points) || 0,
+          trust_mode: d.trust_mode || "inherit",
+        });
+        this._editingChoreId = null;
+        this._choreDraft = this._emptyChoreDraft();
+        this._fireHaptic("success");
+        this._showToast("Chore saved");
+      } catch (err) {
+        this._showToast(err?.message || "Failed to save chore");
+      }
+    });
+  }
+
+  _deleteChore(choreId, name) {
+    if (!confirm(`Delete chore "${name}"?`)) return;
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({ type: `${ENGINE_DOMAIN}/delete_chore`, chore_id: choreId });
+        this._showToast("Chore deleted");
+      } catch (err) {
+        this._showToast(err?.message || "Delete failed");
+      }
+    });
+  }
+
+  _rotateChore(choreId) {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/rotate_chore`,
+          chore_id: choreId,
+          steps: 1,
+        });
+        this._showToast("Turn rotated");
+      } catch (err) {
+        this._showToast(err?.message || "Rotate failed");
+      }
+    });
+  }
+
+  _saveUnlockRule() {
+    if (!this._ruleDraft.name.trim()) {
+      this._showToast("Enter a rule name");
+      return;
+    }
+    return this._runProtectedAction("settings", async () => {
+      try {
+        const r = this._ruleDraft;
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/save_unlock_rule`,
+          rule_id: r.rule_id,
+          name: r.name.trim(),
+          enabled: r.enabled !== false,
+          scope: r.scope || "shared",
+          kid_id: r.scope === "personal" ? r.kid_id || null : null,
+          shared_mode: r.shared_mode || "any_active_kid",
+          target_mode: r.target_mode || "passable_screen_time",
+          screen_time_device_id: r.screen_time_device_id || null,
+          target_entity: r.target_entity || null,
+          nintendo_bonus_minutes: Number(r.nintendo_bonus_minutes) || 60,
+          lock_on_reset: r.lock_on_reset !== false,
+          re_lock_if_uncompleted: r.re_lock_if_uncompleted !== false,
+          respect_screen_time_schedules: r.respect_screen_time_schedules !== false,
+        });
+        this._editingRuleId = null;
+        this._ruleDraft = this._emptyRuleDraft();
+        this._fireHaptic("success");
+        this._showToast("Device unlock rule saved");
+      } catch (err) {
+        this._showToast(err?.message || "Failed to save rule");
+      }
+    });
+  }
+
+  _deleteUnlockRule(ruleId) {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({ type: `${ENGINE_DOMAIN}/delete_unlock_rule`, rule_id: ruleId });
+        this._showToast("Rule deleted");
+      } catch (err) {
+        this._showToast(err?.message || "Delete failed");
+      }
+    });
+  }
+
+  _saveReward() {
+    if (!this._rewardDraft.name.trim()) {
+      this._showToast("Enter a reward name");
+      return;
+    }
+    return this._runProtectedAction("settings", async () => {
+      try {
+        const d = this._rewardDraft;
+        const smartAction =
+          d.reward_type === "smart_action"
+            ? {
+                action_kind: d.action_kind || "screen_time_timer",
+                device_id: d.device_id || "all",
+                entity_id: d.entity_id || null,
+                duration_minutes: Number(d.duration_minutes) || 20,
+                service: d.service || null,
+              }
+            : null;
+        await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/save_reward`,
+          reward_id: d.reward_id,
+          name: d.name.trim(),
+          emoji: d.emoji || "🎁",
+          cost: Number(d.cost) || 25,
+          reward_type: d.reward_type || "parent_fulfilled",
+          auto_approve: d.reward_type === "smart_action" ? d.auto_approve !== false : false,
+          smart_action: smartAction,
+          enabled: true,
+        });
+        this._editingRewardId = null;
+        this._rewardDraft = this._emptyRewardDraft();
+        this._fireHaptic("success");
+        this._showToast("Reward saved");
+      } catch (err) {
+        this._showToast(err?.message || "Failed to save reward");
+      }
+    });
+  }
+
+  _deleteReward(rewardId) {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({ type: `${ENGINE_DOMAIN}/delete_reward`, reward_id: rewardId });
+        this._showToast("Reward deleted");
+      } catch (err) {
+        this._showToast(err?.message || "Delete failed");
+      }
+    });
+  }
+
+  _saveSettingsPatch(patch, toast = "Settings saved") {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        await this.hass.callWS({ type: `${ENGINE_DOMAIN}/save_settings`, ...patch });
+        this._fireHaptic("light");
+        if (toast) this._showToast(toast);
+      } catch (err) {
+        this._showToast(err?.message || "Failed to save settings");
+      }
+    });
+  }
+
+  _resetChores(scope) {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        const res = await this.hass.callWS({
+          type: `${ENGINE_DOMAIN}/reset_chores`,
+          scope,
+        });
+        this._fireHaptic("success");
+        this._showToast(`Reset ${res?.cleared || 0} ${scope} chore(s)`);
+      } catch (err) {
+        this._showToast(err?.message || "Reset failed");
+      }
+    });
+  }
+
+  _seedSampleData() {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        const res = await this.hass.callWS({ type: `${ENGINE_DOMAIN}/seed_sample_data` });
+        this._fireHaptic("success");
+        this._showToast(`Added ${res?.chores_added || 0} chores & ${res?.rewards_added || 0} rewards`);
+      } catch (err) {
+        this._showToast(err?.message || "Seed failed");
+      }
+    });
+  }
+
+  async _saveSecuritySettings() {
+    return this._runProtectedAction("settings", async () => {
+      try {
+        const payload = {
+          type: `${ENGINE_DOMAIN}/save_security_settings`,
+          pin_enabled: this._secPinEnabled,
+          require_pin_for_approvals: this._secReqApprovals,
+          require_pin_for_settings: this._secReqSettings,
+        };
+        if (this._wsData?.security?.pin_enabled) {
+          payload.current_pin = this._secCurrentPin;
+        }
+        if (this._secNewPin.trim() !== "") {
+          payload.new_pin = this._secNewPin.trim();
+        }
+        const res = await this.hass.callWS(payload);
+        this._secCurrentPin = "";
+        this._secNewPin = "";
+        if (res?.security) {
+          this._secPinEnabled = Boolean(res.security.pin_enabled);
+        }
+        this._fireHaptic("success");
+        this._showToast("Parental PIN settings saved");
+      } catch (err) {
+        this._showToast(err?.message || "Failed to save PIN settings");
+      }
+    });
+  }
+
+  // =========================================================================
+  // DRAWER, MODAL & SCROLL GUARD (Passable Design Parity)
+  // =========================================================================
+
+  _toggleDrawer(mode, ev = null) {
+    if (ev) ev.stopPropagation();
+    this._fireHaptic("light");
+    this._drawerMode = this._drawerMode === mode ? null : mode;
+  }
+
+  _openModal(tab = "chores", ev = null) {
+    if (ev) ev.stopPropagation();
+    this._fireHaptic("light");
+    clearTimeout(this._closeModalTimer);
+    clearTimeout(this._swipeResetTimer);
+    this._modalTab = tab;
+    this._modalOpen = true;
+    this._lockBackgroundScroll();
+    this.requestUpdate();
+  }
+
+  _closeModal() {
+    if (!this._modalOpen) return;
+    this._fireHaptic("light");
+    const overlay = this.shadowRoot?.querySelector(".popup-overlay:not(.pin-overlay)");
+    const content = overlay?.querySelector(".popup-content");
+    if (overlay && content) {
+      overlay.classList.add("closing");
+      content.classList.add("closing");
+      this._closeModalTimer = setTimeout(() => {
+        this._modalOpen = false;
+        if (!this._pinModalOpen) this._unlockBackgroundScroll();
+      }, 170);
+    } else {
+      this._modalOpen = false;
+      if (!this._pinModalOpen) this._unlockBackgroundScroll();
+    }
+  }
+
+  _lockBackgroundScroll() {
+    if (this._scrollLockedElements) return;
+    const locked = [];
+    let el = this;
+    while (el) {
+      if (el instanceof HTMLElement && el !== document.documentElement) {
+        const oy = window.getComputedStyle(el).overflowY;
+        if ((oy === "auto" || oy === "scroll" || oy === "overlay") && el.scrollHeight > el.clientHeight) {
+          locked.push({ el, prevOverflowY: el.style.overflowY });
+          el.style.overflowY = "hidden";
+        }
+      }
+      if (el.parentElement) el = el.parentElement;
+      else if (el.getRootNode && el.getRootNode() instanceof ShadowRoot) el = el.getRootNode().host;
+      else break;
+    }
+    const docEl = document.documentElement;
+    if (docEl) {
+      locked.push({ el: docEl, prevOverflowY: docEl.style.overflowY });
+      docEl.style.overflowY = "hidden";
+    }
+    this._scrollLockedElements = locked;
+  }
+
+  _unlockBackgroundScroll() {
+    if (!this._scrollLockedElements) return;
+    for (const item of this._scrollLockedElements) item.el.style.overflowY = item.prevOverflowY;
+    this._scrollLockedElements = null;
+  }
+
+  _attachOverlayScrollGuard() {
+    const overlay = this.shadowRoot?.querySelector(".popup-overlay");
+    if (!overlay || this._scrollGuardOverlay === overlay) return;
+    this._detachOverlayScrollGuard();
+    overlay.addEventListener("wheel", this._onOverlayWheel, { passive: false });
+    overlay.addEventListener("touchstart", this._onOverlayTouchStart, { passive: true });
+    overlay.addEventListener("touchmove", this._onOverlayTouchMove, { passive: false });
+    this._scrollGuardOverlay = overlay;
+  }
+
+  _detachOverlayScrollGuard() {
+    const overlay = this._scrollGuardOverlay;
+    if (!overlay) return;
+    overlay.removeEventListener("wheel", this._onOverlayWheel);
+    overlay.removeEventListener("touchstart", this._onOverlayTouchStart);
+    overlay.removeEventListener("touchmove", this._onOverlayTouchMove);
+    this._scrollGuardOverlay = null;
+  }
+
+  _findScrollableInEventPath(ev) {
+    const path = ev.composedPath ? ev.composedPath() : [];
+    for (const node of path) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.classList?.contains("popup-overlay")) break;
+      const st = window.getComputedStyle(node);
+      if ((st.overflowY === "auto" || st.overflowY === "scroll") && node.scrollHeight > node.clientHeight + 1) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  _onOverlayWheel(ev) {
+    const scroller = this._findScrollableInEventPath(ev);
+    if (!scroller) {
+      if (ev.cancelable) ev.preventDefault();
+      return;
+    }
+    const dy = ev.deltaY;
+    if ((dy < 0 && scroller.scrollTop <= 0) || (dy > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1)) {
+      if (ev.cancelable) ev.preventDefault();
+    }
+  }
+
+  _onOverlayTouchStart(ev) {
+    if (!ev.touches || ev.touches.length !== 1) return;
+    this._guardTouchY = ev.touches[0].clientY;
+    this._guardTouchX = ev.touches[0].clientX;
+  }
+
+  _onOverlayTouchMove(ev) {
+    if (!ev.touches || ev.touches.length !== 1) return;
+    const scroller = this._findScrollableInEventPath(ev);
+    if (!scroller) {
+      if (ev.cancelable) ev.preventDefault();
+      return;
+    }
+    const dy = this._guardTouchY - ev.touches[0].clientY;
+    const dx = Math.abs(this._guardTouchX - ev.touches[0].clientX);
+    if (dx > Math.abs(dy)) return;
+    if ((dy < 0 && scroller.scrollTop <= 0) || (dy > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1)) {
+      if (ev.cancelable) ev.preventDefault();
+    }
+  }
+
+  _handlePopupTouchStart(ev) {
+    if (ev.touches.length !== 1) return;
+    const scrollArea = ev.currentTarget.querySelector(".modal-scroll-area");
+    this._touchInScroll = Boolean(scrollArea && scrollArea.contains(ev.target) && scrollArea.scrollTop > 2);
+    if (this._touchInScroll) return;
+    this._touchStartY = ev.touches[0].clientY;
+    this._touchStartX = ev.touches[0].clientX;
+    this._touchCurrentY = this._touchStartY;
+    this._touchTarget = ev.currentTarget;
+    this._touchDragging = false;
+    this._touchLockedHorizontal = false;
+  }
+
+  _handlePopupTouchMove(ev) {
+    if (this._touchInScroll || this._touchStartY === undefined || this._touchLockedHorizontal) return;
+    const curY = ev.touches[0].clientY;
+    const curX = ev.touches[0].clientX;
+    const dy = curY - this._touchStartY;
+    const dx = curX - this._touchStartX;
+    if (!this._touchDragging) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+        this._touchLockedHorizontal = true;
+        return;
+      }
+      if (dy > 10) {
+        this._touchDragging = true;
+        this._touchTarget.style.transition = "none";
+      } else {
+        return;
+      }
+    }
+    this._touchCurrentY = curY;
+    const offset = Math.max(0, dy);
+    this._touchTarget.style.transform = `translateY(${offset}px)`;
+    const overlay = this.shadowRoot?.querySelector(".popup-overlay");
+    if (overlay) overlay.style.opacity = String(Math.max(0.25, 1 - offset / 380));
+  }
+
+  _handlePopupTouchEnd() {
+    const target = this._touchTarget;
+    const dy = this._touchDragging && this._touchCurrentY !== undefined ? this._touchCurrentY - this._touchStartY : 0;
+    const wasDragging = this._touchDragging;
+    this._touchStartY = undefined;
+    this._touchStartX = undefined;
+    this._touchCurrentY = undefined;
+    this._touchTarget = null;
+    this._touchDragging = false;
+    this._touchInScroll = false;
+    this._touchLockedHorizontal = false;
+    if (!wasDragging || !target) return;
+    const overlay = this.shadowRoot?.querySelector(".popup-overlay");
+    if (dy > 110) {
+      this._closeModal();
+      return;
+    }
+    target.style.transition = "transform 220ms cubic-bezier(0.2, 0, 0, 1)";
+    target.style.transform = "";
+    if (overlay) overlay.style.opacity = "";
+    this._swipeResetTimer = setTimeout(() => {
+      if (target) target.style.transition = "";
+    }, 240);
+  }
+
+  // =========================================================================
+  // DATA COMPUTATION & SUMMARY METRICS
+  // =========================================================================
+
+  _getVisibleKids() {
+    const allKids = this._wsData?.kids || [];
+    const filterIds = Array.isArray(this.config?.kids_filter) && this.config.kids_filter.length > 0
+      ? new Set(this.config.kids_filter)
+      : null;
+
+    return allKids.filter((kid) => {
+      if (filterIds && !filterIds.has(kid.kid_id)) return false;
+      if (this.config?.hide_inactive_kids !== false) {
+        if (!kid.enabled) return false;
+        if ((kid.board || []).length === 0) return false;
+      }
+      return true;
+    });
+  }
+
+  _getSummaryMetrics(visibleKids) {
+    const pending = this._wsData?.pending_approvals || [];
+    const bounties = this._wsData?.bonus_chores || [];
+    const rules = (this._wsData?.unlock_rules || []).filter((r) => r.enabled !== false);
+    const activeKids = visibleKids.filter((k) => k.required_due_total > 0);
+    const totalReq = activeKids.reduce((sum, k) => sum + k.required_due_total, 0);
+    const doneReq = activeKids.reduce((sum, k) => sum + k.required_due_completed, 0);
+    const allDone = activeKids.length > 0 && doneReq >= totalReq;
+    const unlockedRules = rules.filter((r) => r.is_currently_locked === false).length;
+    const openBounties = bounties.filter((b) => !b.claimed_by_kid_id).length;
+
+    return {
+      totalReq,
+      doneReq,
+      allDone,
+      pendingCount: pending.length,
+      openBounties,
+      rulesTotal: rules.length,
+      unlockedRules,
+    };
+  }
+
+  // =========================================================================
+  // RENDERING: SUMMARY STRIP, 4 LAYOUTS, INLINE DRAWER & FOOTER
+  // =========================================================================
+
+  _renderSummaryStrip(visibleKids, metrics) {
+    const cycle = this._wsData?.cycle || {};
+    const settings = this._wsData?.settings || {};
+    const gamified = settings.gamification_enabled !== false;
+
+    const toneClass = metrics.pendingCount > 0
+      ? "amber"
+      : metrics.allDone
+        ? "done"
+        : metrics.totalReq > 0
+          ? "active"
+          : "idle";
+
+    const pillLabel =
+      visibleKids.length === 0
+        ? "Setup Needed"
+        : metrics.totalReq === 0
+          ? "No Required Chores"
+          : metrics.allDone
+            ? `All ${metrics.doneReq}/${metrics.totalReq} Done 🎉`
+            : `${metrics.doneReq}/${metrics.totalReq} Done`;
+
+    return html`
+      <div class="chores-summary-strip ${toneClass}">
+        <div class="summary-strip-left">
+          <span class="summary-status-dot ${toneClass}"></span>
+          <span class="strip-active-pill ${toneClass}">${pillLabel}</span>
+          ${cycle.is_no_school_override
+            ? html`<span class="zone-inline-chip info">No School</span>`
+            : ""}
+          ${metrics.rulesTotal > 0
+            ? html`
+                <span class="zone-inline-chip ${metrics.unlockedRules > 0 ? "success" : "neutral"}">
+                  <ha-icon icon="${metrics.unlockedRules > 0 ? "mdi:television-play" : "mdi:television-lock"}" style="--mdc-icon-size:12px;"></ha-icon>
+                  <span>${metrics.unlockedRules}/${metrics.rulesTotal} Unlocked</span>
+                </span>
+              `
+            : ""}
+        </div>
+
+        <div class="summary-strip-right">
+          ${this._isPinSessionUnlocked()
+            ? html`
+                <button
+                  type="button"
+                  class="icon-circle-btn pin-unlocked"
+                  @click=${() => this._lockPinSession()}
+                  title="Parent session unlocked — tap to lock"
+                >
+                  <ha-icon icon="mdi:lock-open-check-outline" style="--mdc-icon-size:15px;"></ha-icon>
+                </button>
+              `
+            : ""}
+
+          ${metrics.pendingCount > 0
+            ? html`
+                <button
+                  type="button"
+                  class="zone-inline-chip warning clickable"
+                  @click=${() => this._toggleDrawer("approvals")}
+                >
+                  ⏳ ${metrics.pendingCount} Approve
+                </button>
+              `
+            : ""}
+
+          ${metrics.openBounties > 0
+            ? html`
+                <button
+                  type="button"
+                  class="zone-inline-chip info clickable"
+                  @click=${() => this._toggleDrawer("bounties")}
+                >
+                  ⭐ ${metrics.openBounties} Bonus
+                </button>
+              `
+            : ""}
+
+          ${gamified && settings.rewards_enabled !== false && (this._wsData?.rewards || []).length > 0
+            ? html`
+                <button
+                  type="button"
+                  class="icon-circle-btn ${this._drawerMode === "rewards" ? "active" : ""}"
+                  @click=${() => this._toggleDrawer("rewards")}
+                  title="Reward Shop"
+                >
+                  <ha-icon icon="mdi:gift-outline" style="--mdc-icon-size:16px;"></ha-icon>
+                </button>
+              `
+            : ""}
+
+          ${!this.config?.hide_admin_setup
+            ? html`
+                <button
+                  type="button"
+                  class="icon-circle-btn"
+                  @click=${() => this._openModal("chores")}
+                  title="Open Chores Command Center"
+                >
+                  <ha-icon icon="mdi:tune-variant" style="--mdc-icon-size:16px;"></ha-icon>
+                </button>
+              `
+            : ""}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderAvatar(kid, size = 34) {
+    const av = kid.avatar || "🧒";
+    const isUrl = av.startsWith("/") || av.startsWith("http");
+    return html`
+      <div
+        class="kid-avatar"
+        style="width:${size}px;height:${size}px;border-color:${kid.accent_color};background:${hexToRgba(kid.accent_color, 0.16)};"
+      >
+        ${isUrl
+          ? html`<img src="${av}" alt="${kid.name}" />`
+          : html`<span>${av}</span>`}
+      </div>
+    `;
+  }
+
+  _renderChoreTile(kid, item, isLarge = true) {
+    const undoLeft = this._getUndoRemainingSecs(item);
+    const isDone = item.status === "completed";
+    const isWaiting = item.status === "waiting_approval";
+    const showPoints =
+      this._wsData?.settings?.gamification_enabled !== false &&
+      this._wsData?.settings?.points_enabled !== false &&
+      item.points > 0;
+
+    return html`
+      <div
+        class="chore-tile ${isLarge ? "large" : "compact"} ${item.status} ${item.is_due_today_for_unlock ? "" : "flexible"}"
+        style="--kid-accent:${kid.accent_color};--kid-accent-soft:${hexToRgba(kid.accent_color, 0.14)};"
+        @click=${(ev) => this._onChoreTileClick(kid, item, ev)}
+        title=${isDone ? (undoLeft > 0 ? `Tap within ${undoLeft}s to undo` : "Completed") : "Tap to complete"}
+      >
+        <div class="chore-tile-visual">
+          ${item.image
+            ? html`<img class="chore-img" src="${item.image}" alt="${item.name}" />`
+            : html`<span class="chore-emoji">${item.emoji || "🧹"}</span>`}
+        </div>
+
+        <div class="chore-tile-body">
+          <div class="chore-tile-name">${item.name}</div>
+          <div class="chore-tile-meta">
+            ${isWaiting
+              ? html`<span class="meta-pill waiting">⏳ Waiting</span>`
+              : isDone
+                ? html`<span class="meta-pill done">${undoLeft > 0 ? `✓ Undo (${undoLeft}s)` : "✓ Done"}</span>`
+                : html`
+                    ${item.due_label && !item.is_due_today_for_unlock
+                      ? html`<span class="meta-pill neutral">${item.due_label}</span>`
+                      : item.due_label && item.is_due_today_for_unlock
+                        ? html`<span class="meta-pill due">Required Today</span>`
+                        : ""}
+                    ${item.is_rotation_turn
+                      ? html`<span class="meta-pill turn">🔄 Turn</span>`
+                      : ""}
+                    ${showPoints
+                      ? html`<span class="meta-pill stars">+${item.points} ⭐</span>`
+                      : ""}
+                  `}
+          </div>
+        </div>
+
+        <div class="chore-tile-right">
+          ${isWaiting
+            ? html`
+                <div class="inline-approve-pair" @click=${(ev) => ev.stopPropagation()}>
+                  <button
+                    type="button"
+                    class="mini-approve-btn ok"
+                    @click=${(ev) => this._approveChore(item.chore_id, kid.kid_id, ev)}
+                    title="Approve chore"
+                  >✓</button>
+                  <button
+                    type="button"
+                    class="mini-approve-btn no"
+                    @click=${(ev) => this._rejectChore(item.chore_id, kid.kid_id, ev)}
+                    title="Send back (Try Again)"
+                  >↺</button>
+                </div>
+              `
+            : html`
+                <div class="chore-check-circle ${item.status}">
+                  <ha-icon
+                    icon="${isDone ? "mdi:check-bold" : "mdi:circle-outline"}"
+                    style="--mdc-icon-size:18px;"
+                  ></ha-icon>
+                </div>
+              `}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderBoardLayout(visibleKids) {
+    const settings = this._wsData?.settings || {};
+    const showPoints = settings.gamification_enabled !== false && settings.points_enabled !== false;
+    const showStreaks = settings.gamification_enabled !== false && settings.streaks_enabled !== false;
+    const isLarge = this.config?.tile_size !== "compact";
+
+    return html`
+      <div class="kid-board-grid">
+        ${visibleKids.map((kid) => {
+          const celebrating = Boolean(this._celebratingKids[kid.kid_id]);
+          return html`
+            <div
+              class="kid-column-card ${kid.is_all_done_today ? "all-done" : ""} ${celebrating ? "celebrating" : ""}"
+              style="--kid-accent:${kid.accent_color};--kid-accent-soft:${hexToRgba(kid.accent_color, 0.1)};--kid-accent-border:${hexToRgba(kid.accent_color, 0.36)};"
+            >
+              ${celebrating
+                ? html`
+                    <div class="confetti-layer" aria-hidden="true">
+                      <span>🎉</span><span>⭐</span><span>✨</span><span>🎊</span><span>🌟</span>
+                    </div>
+                  `
+                : ""}
+              <div class="kid-col-header">
+                <div class="kid-col-identity">
+                  ${this._renderAvatar(kid, 36)}
+                  <div class="kid-col-titles">
+                    <div class="kid-col-name">${kid.name}</div>
+                    <div class="kid-col-sub">
+                      ${kid.is_all_done_today
+                        ? html`<span class="done-text">All Done! 🎉</span>`
+                        : kid.required_due_total > 0
+                          ? html`<span>${kid.required_due_completed}/${kid.required_due_total} required</span>`
+                          : html`<span>${kid.visible_completed}/${kid.visible_total} optional</span>`}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="kid-col-badges">
+                  ${showStreaks && kid.streak_current > 0
+                    ? html`<span class="kid-badge fire" title="Current streak">🔥 ${kid.streak_current}</span>`
+                    : ""}
+                  ${showPoints
+                    ? html`
+                        <button
+                          type="button"
+                          class="kid-badge stars clickable"
+                          @click=${() => {
+                            this._selectedRewardKidId = kid.kid_id;
+                            this._toggleDrawer("rewards");
+                          }}
+                          title="Tap to open ${kid.name}'s Rewards"
+                        >⭐ ${kid.points}</button>
+                      `
+                    : ""}
+                </div>
+              </div>
+
+              <div class="kid-progress-track">
+                <div
+                  class="kid-progress-fill"
+                  style="width:${kid.progress_pct}%;background:${kid.is_all_done_today ? "#22c55e" : kid.accent_color};"
+                ></div>
+              </div>
+
+              <div class="kid-chore-list">
+                ${(kid.board || []).map((item) => this._renderChoreTile(kid, item, isLarge))}
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  _renderTilesLayout(visibleKids) {
+    return html`
+      <div class="kid-tiles-grid">
+        ${visibleKids.map((kid, idx) => {
+          const isSelected = this._drawerMode === kid.kid_id;
+          const spanClass = visibleKids.length % 2 === 1 && idx === visibleKids.length - 1 ? "span-2" : "";
+          return html`
+            <div
+              class="kid-summary-tile ${spanClass} ${kid.is_all_done_today ? "all-done" : ""} ${isSelected ? "selected" : ""}"
+              style="--kid-accent:${kid.accent_color};"
+              @click=${() => this._toggleDrawer(kid.kid_id)}
+            >
+              <div class="tile-main">
+                <div class="tile-identity">
+                  ${this._renderAvatar(kid, 34)}
+                  <div class="tile-text">
+                    <div class="tile-name">${kid.name}</div>
+                    <div class="tile-sub">
+                      ${kid.is_all_done_today
+                        ? "All Done! 🎉"
+                        : `${kid.required_due_completed}/${kid.required_due_total} required`}
+                      ${kid.streak_current > 0 ? ` · 🔥${kid.streak_current}` : ""}
+                    </div>
+                  </div>
+                </div>
+                <div class="tile-stat" style="color:${kid.is_all_done_today ? "#16a34a" : kid.accent_color};">
+                  ${kid.progress_pct}%
+                </div>
+              </div>
+              <div class="tile-hairline">
+                <div
+                  class="tile-hairline-fill"
+                  style="width:${kid.progress_pct}%;background:${kid.is_all_done_today ? "#22c55e" : kid.accent_color};"
+                ></div>
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  _renderRowsLayout(visibleKids) {
+    return html`
+      <div class="kid-rows-stack">
+        ${visibleKids.map((kid) => {
+          const isSelected = this._drawerMode === kid.kid_id;
+          return html`
+            <div
+              class="kid-summary-row ${kid.is_all_done_today ? "all-done" : ""} ${isSelected ? "selected" : ""}"
+              @click=${() => this._toggleDrawer(kid.kid_id)}
+            >
+              <div class="tile-identity">
+                ${this._renderAvatar(kid, 34)}
+                <div class="tile-text">
+                  <div class="tile-name">${kid.name}</div>
+                  <div class="tile-sub">
+                    ${kid.required_due_completed}/${kid.required_due_total} required
+                    ${kid.streak_current > 0 ? ` · 🔥 ${kid.streak_current}` : ""}
+                    ${kid.points > 0 ? ` · ⭐ ${kid.points}` : ""}
+                  </div>
+                </div>
+              </div>
+              <div class="row-right">
+                <span class="tile-stat" style="color:${kid.is_all_done_today ? "#16a34a" : kid.accent_color};">
+                  ${kid.progress_pct}%
+                </span>
+                <ha-icon icon="${isSelected ? "mdi:chevron-up" : "mdi:chevron-down"}" style="--mdc-icon-size:16px;"></ha-icon>
+              </div>
+            </div>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  _renderRingsLayout(visibleKids) {
+    const r = 16;
+    const c = 2 * Math.PI * r;
+    return html`
+      <div class="kid-rings-grid" style="grid-template-columns:repeat(${Math.max(1, visibleKids.length)}, minmax(0, 1fr));">
+        ${visibleKids.map((kid) => {
+          const isSelected = this._drawerMode === kid.kid_id;
+          const pct = Math.max(0, Math.min(100, kid.progress_pct || 0));
+          const dash = (pct / 100) * c;
+          const stroke = kid.is_all_done_today ? "#22c55e" : kid.accent_color;
+          return html`
+            <button
+              type="button"
+              class="ring-tile-btn ${isSelected ? "selected" : ""}"
+              @click=${() => this._toggleDrawer(kid.kid_id)}
+            >
+              <div class="ring-wrap">
+                ${svg`<svg class="ring-svg" viewBox="0 0 40 40">
+                  <circle cx="20" cy="20" r="${r}" fill="none" stroke="rgba(148,163,184,0.18)" stroke-width="3.2"></circle>
+                  <circle cx="20" cy="20" r="${r}" fill="none" stroke="${stroke}" stroke-width="3.2" stroke-linecap="round"
+                    stroke-opacity="${pct > 0 ? 1 : 0}" stroke-dasharray="${dash} ${c}"></circle>
+                </svg>`}
+                <span class="ring-val">${kid.avatar || `${pct}%`}</span>
+              </div>
+              <span class="ring-name">${kid.name}</span>
+              <span class="ring-sub">${kid.required_due_completed}/${kid.required_due_total}${kid.streak_current > 0 ? ` 🔥${kid.streak_current}` : ""}</span>
+            </button>
+          `;
+        })}
+      </div>
+    `;
+  }
+
+  _renderInlineDrawer(visibleKids) {
+    if (!this._drawerMode) return "";
+
+    if (this._drawerMode === "approvals") {
+      const pending = this._wsData?.pending_approvals || [];
+      return html`
+        <div class="chores-drawer">
+          <div class="drawer-header">
+            <span class="drawer-title">Pending Approvals (${pending.length})</span>
+            <div class="drawer-actions">
+              ${pending.some((p) => p.kind === "chore")
+                ? html`<button type="button" class="drawer-manage-btn" @click=${() => this._approveAllPending()}>Approve All Chores</button>`
+                : ""}
+              <button type="button" class="drawer-close-btn" @click=${() => (this._drawerMode = null)}>
+                <ha-icon icon="mdi:close" style="--mdc-icon-size:16px;"></ha-icon>
+              </button>
+            </div>
+          </div>
+          <div class="drawer-list thin-scroll">
+            ${pending.length === 0
+              ? html`<div class="drawer-empty">Nothing waiting for approval!</div>`
+              : pending.map((p) =>
+                  p.kind === "chore"
+                    ? html`
+                        <div class="drawer-row">
+                          <div class="drawer-row-left">
+                            <span class="drawer-emoji">${p.emoji}</span>
+                            <div>
+                              <div class="drawer-row-title">${p.title}</div>
+                              <div class="drawer-row-sub">${p.kid_avatar} ${p.kid_name} · +${p.points} ⭐</div>
+                            </div>
+                          </div>
+                          <div class="drawer-actions">
+                            <button type="button" class="quick-chip green" @click=${() => this._approveChore(p.chore_id, p.kid_id)}>Approve</button>
+                            <button type="button" class="quick-chip amber" @click=${() => this._rejectChore(p.chore_id, p.kid_id)}>Try Again</button>
+                          </div>
+                        </div>
+                      `
+                    : html`
+                        <div class="drawer-row">
+                          <div class="drawer-row-left">
+                            <span class="drawer-emoji">${p.emoji}</span>
+                            <div>
+                              <div class="drawer-row-title">${p.title}</div>
+                              <div class="drawer-row-sub">${p.kid_avatar} ${p.kid_name} · ${p.cost} ⭐</div>
+                            </div>
+                          </div>
+                          <div class="drawer-actions">
+                            <button type="button" class="quick-chip green" @click=${() => this._resolveRedemption(p.redemption_id, true)}>Fulfill</button>
+                            <button type="button" class="quick-chip danger" @click=${() => this._resolveRedemption(p.redemption_id, false)}>Refund</button>
+                          </div>
+                        </div>
+                      `
+                )}
+          </div>
+        </div>
+      `;
+    }
+
+    if (this._drawerMode === "bounties") {
+      const bounties = this._wsData?.bonus_chores || [];
+      const kids = (this._wsData?.kids || []).filter((k) => k.enabled);
+      return html`
+        <div class="chores-drawer">
+          <div class="drawer-header">
+            <span class="drawer-title">⭐ Bonus Chores Up for Grabs</span>
+            <button type="button" class="drawer-close-btn" @click=${() => (this._drawerMode = null)}>
+              <ha-icon icon="mdi:close" style="--mdc-icon-size:16px;"></ha-icon>
+            </button>
+          </div>
+          ${kids.length > 0
+            ? html`
+                <div class="kid-selector-pills">
+                  <span class="selector-label">Claim as:</span>
+                  ${kids.map(
+                    (k) => html`
+                      <button
+                        type="button"
+                        class="kid-pick-pill ${this._selectedBountyKidId === k.kid_id ? "active" : ""}"
+                        style="--kid-accent:${k.accent_color};"
+                        @click=${() => (this._selectedBountyKidId = k.kid_id)}
+                      >${k.avatar} ${k.name}</button>
+                    `
+                  )}
+                </div>
+              `
+            : ""}
+          <div class="drawer-list thin-scroll">
+            ${bounties.map(
+              (b) => html`
+                <div class="drawer-row">
+                  <div class="drawer-row-left">
+                    <span class="drawer-emoji">${b.emoji}</span>
+                    <div>
+                      <div class="drawer-row-title">${b.name}</div>
+                      <div class="drawer-row-sub">
+                        +${b.points} ⭐
+                        ${b.claimed_by_name ? ` · Claimed by ${b.claimed_by_name}` : " · Open"}
+                      </div>
+                    </div>
+                  </div>
+                  ${b.claimed_by_kid_id
+                    ? html`<span class="meta-pill done">Claimed</span>`
+                    : html`
+                        <button
+                          type="button"
+                          class="quick-chip sky"
+                          @click=${() => this._claimBounty(b.chore_id, this._selectedBountyKidId)}
+                        >Claim +${b.points} ⭐</button>
+                      `}
+                </div>
+              `
+            )}
+          </div>
+        </div>
+      `;
+    }
+
+    if (this._drawerMode === "rewards") {
+      const rewards = (this._wsData?.rewards || []).filter((r) => r.enabled !== false);
+      const kids = (this._wsData?.kids || []).filter((k) => k.enabled);
+      const activeKid = kids.find((k) => k.kid_id === this._selectedRewardKidId) || kids[0];
+      return html`
+        <div class="chores-drawer">
+          <div class="drawer-header">
+            <span class="drawer-title">🎁 Reward Shop</span>
+            <button type="button" class="drawer-close-btn" @click=${() => (this._drawerMode = null)}>
+              <ha-icon icon="mdi:close" style="--mdc-icon-size:16px;"></ha-icon>
+            </button>
+          </div>
+          ${kids.length > 0
+            ? html`
+                <div class="kid-selector-pills">
+                  ${kids.map(
+                    (k) => html`
+                      <button
+                        type="button"
+                        class="kid-pick-pill ${activeKid?.kid_id === k.kid_id ? "active" : ""}"
+                        style="--kid-accent:${k.accent_color};"
+                        @click=${() => (this._selectedRewardKidId = k.kid_id)}
+                      >${k.avatar} ${k.name} (${k.points} ⭐)</button>
+                    `
+                  )}
+                </div>
+              `
+            : ""}
+          <div class="drawer-list thin-scroll">
+            ${rewards.length === 0
+              ? html`<div class="drawer-empty">No rewards configured yet.</div>`
+              : rewards.map((rw) => {
+                  const canAfford = activeKid && activeKid.points >= rw.cost;
+                  return html`
+                    <div class="drawer-row">
+                      <div class="drawer-row-left">
+                        <span class="drawer-emoji">${rw.emoji}</span>
+                        <div>
+                          <div class="drawer-row-title">${rw.name}</div>
+                          <div class="drawer-row-sub">${rw.cost} ⭐ · ${rw.reward_type === "smart_action" ? "Instant Smart Action" : "Parent Fulfilled"}</div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="quick-chip ${canAfford ? "green" : ""}"
+                        ?disabled=${!canAfford}
+                        @click=${() => this._redeemReward(rw.reward_id, activeKid?.kid_id)}
+                      >Redeem</button>
+                    </div>
+                  `;
+                })}
+          </div>
+        </div>
+      `;
+    }
+
+    // Per-kid drawer (used for tiles / rows / rings layouts)
+    const kid = visibleKids.find((k) => k.kid_id === this._drawerMode);
+    if (!kid) return "";
+    return html`
+      <div class="chores-drawer">
+        <div class="drawer-header">
+          <span class="drawer-title">${kid.avatar} ${kid.name}'s Chores</span>
+          <button type="button" class="drawer-close-btn" @click=${() => (this._drawerMode = null)}>
+            <ha-icon icon="mdi:close" style="--mdc-icon-size:16px;"></ha-icon>
+          </button>
+        </div>
+        <div class="kid-chore-list">
+          ${(kid.board || []).map((item) => this._renderChoreTile(kid, item, this.config?.tile_size !== "compact"))}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderFooterStrip(metrics) {
+    if (this.config?.show_footer_strip === false) return "";
+    const settings = this._wsData?.settings || {};
+    const cycle = this._wsData?.cycle || {};
+    return html`
+      <div class="engine-footer-strip">
+        <div class="footer-chips">
+          ${metrics.openBounties > 0
+            ? html`
+                <button type="button" class="footer-chip sky" @click=${() => this._toggleDrawer("bounties")}>
+                  ⭐ ${metrics.openBounties} Bonus
+                </button>
+              `
+            : ""}
+          ${settings.gamification_enabled !== false && settings.rewards_enabled !== false
+            ? html`
+                <button type="button" class="footer-chip" @click=${() => this._toggleDrawer("rewards")}>
+                  🎁 Rewards
+                </button>
+              `
+            : ""}
+          ${metrics.pendingCount > 0
+            ? html`
+                <button type="button" class="footer-chip amber" @click=${() => this._toggleDrawer("approvals")}>
+                  ⏳ ${metrics.pendingCount} Waiting
+                </button>
+              `
+            : ""}
+          ${cycle.manual_no_school_active
+            ? html`<span class="footer-chip sky">No-School Active</span>`
+            : ""}
+        </div>
+
+        ${!this.config?.hide_admin_setup
+          ? html`
+              <button type="button" class="footer-command-link" @click=${() => this._openModal("chores")}>
+                Command Center →
+              </button>
+            `
+          : ""}
+      </div>
+    `;
+  }
+
+  // =========================================================================
+  // 4-TAB COMMAND CENTER MODAL
+  // =========================================================================
+
+  _renderModal() {
+    if (!this._modalOpen && this.config?.display_mode !== "full") return "";
+    if (this.config?.display_mode === "full") return "";
+
+    return html`
+      <div class="popup-overlay" @click=${() => this._closeModal()}>
+        <div
+          class="popup-content"
+          @click=${(ev) => ev.stopPropagation()}
+          @touchstart=${(ev) => this._handlePopupTouchStart(ev)}
+          @touchmove=${(ev) => this._handlePopupTouchMove(ev)}
+          @touchend=${() => this._handlePopupTouchEnd()}
+          @touchcancel=${() => this._handlePopupTouchEnd()}
+        >
+          <div class="drag-handle"></div>
+          <div class="popup-header">
+            <div class="popup-header-left">
+              <ha-icon icon="mdi:clipboard-check-multiple-outline" style="color:#10b981;--mdc-icon-size:24px;"></ha-icon>
+              <div>
+                <h3>Chores Command Center</h3>
+                <div class="popup-header-sub">Cycle ${this._wsData?.cycle?.cycle_date || ""} · Reset ${this._wsData?.cycle?.daily_reset_time || "05:00"}</div>
+              </div>
+            </div>
+            <button type="button" class="close-button" @click=${() => this._closeModal()}>
+              <ha-icon icon="mdi:close" style="--mdc-icon-size:20px;"></ha-icon>
+            </button>
+          </div>
+
+          <div class="popup-tabs">
+            ${MODAL_TABS.map(
+              (t) => html`
+                <button
+                  type="button"
+                  class="popup-tab ${this._modalTab === t.id ? "active-tab" : ""}"
+                  @click=${() => {
+                    this._fireHaptic("light");
+                    this._modalTab = t.id;
+                  }}
+                >
+                  <ha-icon icon="${t.icon}"></ha-icon>
+                  <span>${t.label}</span>
+                </button>
+              `
+            )}
+          </div>
+
+          <div class="modal-scroll-area thin-scroll">
+            ${this._renderTabContent()}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderTabContent() {
+    if (this._modalTab === "chores") return this._renderChoresTab();
+    if (this._modalTab === "kids") return this._renderKidsTab();
+    if (this._modalTab === "unlocks") return this._renderUnlocksRewardsTab();
+    return this._renderSetupActivityTab();
+  }
+
+  _renderChoresTab() {
+    const kids = this._wsData?.kids || [];
+    const chores = this._wsData?.chores || [];
+    const d = this._choreDraft;
+    const filtered = chores.filter(
+      (c) => this._choreFilterKid === "all" || (c.assigned_kids || []).includes(this._choreFilterKid)
+    );
+
+    return html`
+      <div class="modal-tab-body">
+        <div class="passable-section-card">
+          <div class="passable-section-header">
+            <span class="passable-section-title">${d.chore_id ? "Edit Chore" : "Add Chore"}</span>
+            ${d.chore_id
+              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._choreDraft = this._emptyChoreDraft())}>+ New</button>`
+              : ""}
+          </div>
+
+          ${!d.chore_id
+            ? html`
+                <div class="preset-chips-row">
+                  ${CHORE_STARTER_TEMPLATES.map(
+                    (tpl) => html`
+                      <button
+                        type="button"
+                        class="preset-chip"
+                        @click=${() => {
+                          this._choreDraft = {
+                            ...this._emptyChoreDraft(),
+                            ...tpl,
+                            assigned_kids: kids.filter((k) => k.enabled).map((k) => k.kid_id),
+                          };
+                        }}
+                      >${tpl.emoji} ${tpl.name}</button>
+                    `
+                  )}
+                </div>
+              `
+            : ""}
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Chore Name</label>
+              <input
+                class="field-input"
+                type="text"
+                placeholder="e.g. Brush Teeth"
+                .value=${d.name}
+                @input=${(ev) => (this._choreDraft = { ...d, name: ev.target.value })}
+              />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Emoji Icon</label>
+              <input
+                class="field-input"
+                type="text"
+                .value=${d.emoji}
+                @input=${(ev) => (this._choreDraft = { ...d, emoji: ev.target.value })}
+              />
+            </div>
+          </div>
+
+          <div class="preset-chips-row">
+            ${CHORE_EMOJI_PRESETS.map(
+              (em) => html`
+                <button
+                  type="button"
+                  class="emoji-chip ${d.emoji === em ? "active" : ""}"
+                  @click=${() => (this._choreDraft = { ...d, emoji: em })}
+                >${em}</button>
+              `
+            )}
+          </div>
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Tier</label>
+              <select
+                class="field-input"
+                .value=${d.tier}
+                @change=${(ev) => (this._choreDraft = { ...d, tier: ev.target.value })}
+              >
+                <option value="required">Required (Gates Unlocks)</option>
+                <option value="bonus">Bonus (Extra Stars)</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Schedule</label>
+              <select
+                class="field-input"
+                .value=${d.schedule_type}
+                @change=${(ev) => (this._choreDraft = { ...d, schedule_type: ev.target.value })}
+              >
+                <option value="daily">Daily</option>
+                <option value="school_days">School Days (Mon–Fri, respects holidays)</option>
+                <option value="weekends">Weekends (+ No-School Days)</option>
+                <option value="weekly">Weekly (Flexible or Fixed Day)</option>
+                <option value="custom_days">Custom Days</option>
+              </select>
+            </div>
+          </div>
+
+          ${d.schedule_type === "custom_days"
+            ? html`
+                <div class="day-chips">
+                  ${DAYS_LIST.map((day, idx) => {
+                    const sel = (d.custom_days || []).includes(day);
+                    return html`
+                      <button
+                        type="button"
+                        class="day-chip ${sel ? "selected" : ""}"
+                        @click=${() => {
+                          const set = new Set(d.custom_days || []);
+                          if (set.has(day)) set.delete(day);
+                          else set.add(day);
+                          this._choreDraft = { ...d, custom_days: DAYS_LIST.filter((x) => set.has(x)) };
+                        }}
+                      >${DAYS_SHORT[idx]}</button>
+                    `;
+                  })}
+                </div>
+              `
+            : ""}
+
+          ${d.schedule_type === "weekly"
+            ? html`
+                <div class="two-col-grid">
+                  <div class="field-group">
+                    <label class="field-label">Required By Day</label>
+                    <select
+                      class="field-input"
+                      .value=${d.weekly_due_day || ""}
+                      @change=${(ev) => (this._choreDraft = { ...d, weekly_due_day: ev.target.value })}
+                    >
+                      <option value="">Use Global Default (${this._wsData?.cycle?.weekly_due_day || "sat"})</option>
+                      ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
+                    </select>
+                  </div>
+                  <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
+                    <span class="switch-title">Show Early All Week</span>
+                    <button
+                      type="button"
+                      class="m3-switch small ${d.weekly_flexible ? "on" : ""}"
+                      @click=${() => (this._choreDraft = { ...d, weekly_flexible: !d.weekly_flexible })}
+                    ><span class="m3-knob"></span></button>
+                  </div>
+                </div>
+              `
+            : ""}
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Assignment Mode</label>
+              <select
+                class="field-input"
+                .value=${d.assignment_mode}
+                @change=${(ev) => (this._choreDraft = { ...d, assignment_mode: ev.target.value })}
+              >
+                <option value="each">Each Selected Kid</option>
+                <option value="rotate_weekly">Take Turns Weekly</option>
+                <option value="up_for_grabs">Up for Grabs (Bonus)</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label">Star Points (⭐)</label>
+              <input
+                class="field-input"
+                type="number"
+                min="0"
+                max="500"
+                .value=${String(d.points)}
+                @input=${(ev) => (this._choreDraft = { ...d, points: Number(ev.target.value) })}
+              />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">Trust / Approval Override</label>
+            <select
+              class="field-input"
+              .value=${d.trust_mode}
+              @change=${(ev) => (this._choreDraft = { ...d, trust_mode: ev.target.value })}
+            >
+              <option value="inherit">Inherit Kid / Global Default</option>
+              <option value="honor_system">Always Honor System</option>
+              <option value="parent_approval">Always Require Parent Approval</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">Assigned Kids</label>
+            <div class="kid-selector-pills">
+              ${kids.map((k) => {
+                const sel = (d.assigned_kids || []).includes(k.kid_id);
+                return html`
+                  <button
+                    type="button"
+                    class="kid-pick-pill ${sel ? "active" : ""}"
+                    style="--kid-accent:${k.accent_color};"
+                    @click=${() => {
+                      const set = new Set(d.assigned_kids || []);
+                      if (set.has(k.kid_id)) set.delete(k.kid_id);
+                      else set.add(k.kid_id);
+                      this._choreDraft = { ...d, assigned_kids: Array.from(set) };
+                    }}
+                  >${k.avatar} ${k.name}</button>
+                `;
+              })}
+            </div>
+          </div>
+
+          <button type="button" class="primary-cta-btn" @click=${() => this._saveChore()}>
+            ${d.chore_id ? "Update Chore" : "Save Chore"}
+          </button>
+        </div>
+
+        <div class="passable-section-card">
+          <div class="passable-section-header">
+            <span class="passable-section-title">Configured Chores (${filtered.length})</span>
+            <div class="drawer-actions">
+              <button type="button" class="tiny-preset-btn" @click=${() => this._resetChores("daily")}>Reset Daily</button>
+              <button type="button" class="tiny-preset-btn" @click=${() => this._resetChores("weekly")}>Reset Weekly</button>
+            </div>
+          </div>
+
+          <div class="kid-selector-pills">
+            <button type="button" class="kid-pick-pill ${this._choreFilterKid === "all" ? "active" : ""}" @click=${() => (this._choreFilterKid = "all")}>All</button>
+            ${kids.map(
+              (k) => html`
+                <button
+                  type="button"
+                  class="kid-pick-pill ${this._choreFilterKid === k.kid_id ? "active" : ""}"
+                  style="--kid-accent:${k.accent_color};"
+                  @click=${() => (this._choreFilterKid = k.kid_id)}
+                >${k.avatar} ${k.name}</button>
+              `
+            )}
+          </div>
+
+          ${filtered.length === 0
+            ? html`<div class="muted-hint">No chores match this filter yet.</div>`
+            : filtered.map(
+                (c) => html`
+                  <div class="drawer-row">
+                    <div class="drawer-row-left">
+                      <span class="drawer-emoji">${c.emoji}</span>
+                      <div>
+                        <div class="drawer-row-title">${c.name}</div>
+                        <div class="drawer-row-sub">${c.schedule_type} · ${c.assignment_mode} · ${c.points} ⭐</div>
+                      </div>
+                    </div>
+                    <div class="drawer-actions">
+                      ${c.assignment_mode === "rotate_weekly"
+                        ? html`<button type="button" class="icon-mini-btn" @click=${() => this._rotateChore(c.chore_id)} title="Rotate turn"><ha-icon icon="mdi:rotate-right" style="--mdc-icon-size:15px;"></ha-icon></button>`
+                        : ""}
+                      <button
+                        type="button"
+                        class="icon-mini-btn"
+                        @click=${() => (this._choreDraft = { ...c, weekly_due_day: c.weekly_due_day || "" })}
+                        title="Edit"
+                      ><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                      <button
+                        type="button"
+                        class="icon-mini-btn danger"
+                        @click=${() => this._deleteChore(c.chore_id, c.name)}
+                        title="Delete"
+                      ><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                    </div>
+                  </div>
+                `
+              )}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderKidsTab() {
+    const kids = this._wsData?.kids || [];
+    const k = this._kidDraft;
+    return html`
+      <div class="modal-tab-body">
+        <div class="passable-section-card">
+          <div class="passable-section-header">
+            <span class="passable-section-title">${k.kid_id ? "Edit Child Profile" : "Add Child"}</span>
+            ${k.kid_id
+              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._kidDraft = this._emptyKidDraft())}>+ New</button>`
+              : ""}
+          </div>
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Child Name</label>
+              <input
+                class="field-input"
+                type="text"
+                placeholder="e.g. Madeleine"
+                .value=${k.name}
+                @input=${(ev) => (this._kidDraft = { ...k, name: ev.target.value })}
+              />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Avatar Emoji or /local/ Image URL</label>
+              <input
+                class="field-input"
+                type="text"
+                .value=${k.avatar}
+                @input=${(ev) => (this._kidDraft = { ...k, avatar: ev.target.value })}
+              />
+            </div>
+          </div>
+
+          <div class="preset-chips-row">
+            ${KID_AVATAR_PRESETS.map(
+              (av) => html`
+                <button
+                  type="button"
+                  class="emoji-chip ${k.avatar === av ? "active" : ""}"
+                  @click=${() => (this._kidDraft = { ...k, avatar: av })}
+                >${av}</button>
+              `
+            )}
+          </div>
+
+          <div class="field-group">
+            <label class="field-label">Accent Color</label>
+            <div class="color-swatches-row">
+              ${KID_COLOR_PRESETS.map(
+                (col) => html`
+                  <button
+                    type="button"
+                    class="color-swatch ${k.accent_color === col ? "active" : ""}"
+                    style="background:${col};"
+                    @click=${() => (this._kidDraft = { ...k, accent_color: col })}
+                  ></button>
+                `
+              )}
+            </div>
+          </div>
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Trust Mode</label>
+              <select
+                class="field-input"
+                .value=${k.trust_mode}
+                @change=${(ev) => (this._kidDraft = { ...k, trust_mode: ev.target.value })}
+              >
+                <option value="inherit">Inherit Global Setting</option>
+                <option value="honor_system">Honor System (Instant)</option>
+                <option value="parent_approval">Require Parent Approval</option>
+              </select>
+            </div>
+            <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
+              <span class="switch-title">Profile Active</span>
+              <button
+                type="button"
+                class="m3-switch small ${k.enabled !== false ? "on" : ""}"
+                @click=${() => (this._kidDraft = { ...k, enabled: !(k.enabled !== false) })}
+              ><span class="m3-knob"></span></button>
+            </div>
+          </div>
+
+          <button type="button" class="primary-cta-btn" @click=${() => this._saveKid()}>
+            ${k.kid_id ? "Update Child" : "Add Child"}
+          </button>
+        </div>
+
+        <div class="passable-section-card">
+          <div class="passable-section-header">
+            <span class="passable-section-title">Kids (${kids.length})</span>
+          </div>
+          ${kids.length === 0
+            ? html`<div class="muted-hint">Add your kids above to get started.</div>`
+            : kids.map(
+                (kid) => html`
+                  <div class="drawer-row">
+                    <div class="drawer-row-left">
+                      ${this._renderAvatar(kid, 32)}
+                      <div>
+                        <div class="drawer-row-title">${kid.name} ${!kid.enabled ? "(Paused)" : ""}</div>
+                        <div class="drawer-row-sub">⭐ ${kid.points} · 🔥 ${kid.streak_current}d · ${kid.effective_trust_mode === "parent_approval" ? "Approval Req" : "Honor System"}</div>
+                      </div>
+                    </div>
+                    <div class="drawer-actions">
+                      <button type="button" class="tiny-preset-btn" @click=${() => this._adjustPoints(kid.kid_id, 5)}>+5⭐</button>
+                      <button type="button" class="tiny-preset-btn" @click=${() => this._adjustPoints(kid.kid_id, -5)}>-5⭐</button>
+                      <button
+                        type="button"
+                        class="icon-mini-btn"
+                        @click=${() => (this._kidDraft = { ...kid })}
+                      ><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                      <button
+                        type="button"
+                        class="icon-mini-btn danger"
+                        @click=${() => this._deleteKid(kid.kid_id, kid.name)}
+                      ><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                    </div>
+                  </div>
+                `
+              )}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderUnlocksRewardsTab() {
+    const kids = this._wsData?.kids || [];
+    const rules = this._wsData?.unlock_rules || [];
+    const rewards = this._wsData?.rewards || [];
+    const cands = this._wsData?.candidates || {};
+    const r = this._ruleDraft;
+    const rw = this._rewardDraft;
+
+    return html`
+      <div class="modal-tab-body">
+        <div class="passable-section-card">
+          <div class="passable-section-header">
+            <span class="passable-section-title">${r.rule_id ? "Edit Device Unlock Rule" : "Add Device Unlock Rule"}</span>
+            ${r.rule_id
+              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._ruleDraft = this._emptyRuleDraft())}>+ New</button>`
+              : ""}
+          </div>
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Rule Name</label>
+              <input
+                class="field-input"
+                type="text"
+                placeholder="e.g. Living Room TV"
+                .value=${r.name}
+                @input=${(ev) => (this._ruleDraft = { ...r, name: ev.target.value })}
+              />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Unlock Scope</label>
+              <select
+                class="field-input"
+                .value=${r.scope}
+                @change=${(ev) => (this._ruleDraft = { ...r, scope: ev.target.value })}
+              >
+                <option value="shared">Shared Family Device</option>
+                <option value="personal">Personal Child Device</option>
+              </select>
+            </div>
+          </div>
+
+          ${r.scope === "personal"
+            ? html`
+                <div class="field-group">
+                  <label class="field-label">Child</label>
+                  <select
+                    class="field-input"
+                    .value=${r.kid_id}
+                    @change=${(ev) => (this._ruleDraft = { ...r, kid_id: ev.target.value })}
+                  >
+                    <option value="">Select Child...</option>
+                    ${kids.map((kid) => html`<option value="${kid.kid_id}">${kid.avatar} ${kid.name}</option>`)}
+                  </select>
+                </div>
+              `
+            : html`
+                <div class="field-group">
+                  <label class="field-label">Shared Unlock Condition (0-Chore Kids Ignored)</label>
+                  <select
+                    class="field-input"
+                    .value=${r.shared_mode}
+                    @change=${(ev) => (this._ruleDraft = { ...r, shared_mode: ev.target.value })}
+                  >
+                    <option value="any_active_kid">Any Active Kid Finishes</option>
+                    <option value="all_active_kids">All Active Kids Finish</option>
+                  </select>
+                </div>
+              `}
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Target Integration / Mode</label>
+              <select
+                class="field-input"
+                .value=${r.target_mode}
+                @change=${(ev) => (this._ruleDraft = { ...r, target_mode: ev.target.value })}
+              >
+                <option value="passable_screen_time">Passable Screen Time Engine</option>
+                <option value="lockout_switch">Lockout Switch (ON = Locked)</option>
+                <option value="power_switch">Power Switch / TV (OFF = Locked)</option>
+                <option value="nintendo_switch">Nintendo Switch Max Time</option>
+              </select>
+            </div>
+
+            ${r.target_mode === "passable_screen_time"
+              ? html`
+                  <div class="field-group">
+                    <label class="field-label">Screen Time Device</label>
+                    <select
+                      class="field-input"
+                      .value=${r.screen_time_device_id}
+                      @change=${(ev) => (this._ruleDraft = { ...r, screen_time_device_id: ev.target.value })}
+                    >
+                      <option value="">Select Device...</option>
+                      <option value="all">All Screen Time Devices</option>
+                      ${(cands.screen_time_devices || []).map(
+                        (dev) => html`<option value="${dev.device_id}">${dev.name}</option>`
+                      )}
+                    </select>
+                  </div>
+                `
+              : html`
+                  <div class="field-group">
+                    <label class="field-label">Target Entity</label>
+                    <select
+                      class="field-input"
+                      .value=${r.target_entity}
+                      @change=${(ev) => (this._ruleDraft = { ...r, target_entity: ev.target.value })}
+                    >
+                      <option value="">Select Entity...</option>
+                      ${(r.target_mode === "nintendo_switch" ? cands.nintendo_numbers : cands.switches || []).map(
+                        (ent) => html`<option value="${ent.entity_id}">${ent.name} (${ent.entity_id})</option>`
+                      )}
+                    </select>
+                  </div>
+                `}
+          </div>
+
+          <div class="switch-control-row">
+            <span class="switch-sub">Lock on morning reset & respect Screen Time bedtime schedules</span>
+            <button
+              type="button"
+              class="m3-switch small ${r.respect_screen_time_schedules !== false ? "on" : ""}"
+              @click=${() => (this._ruleDraft = { ...r, respect_screen_time_schedules: !(r.respect_screen_time_schedules !== false) })}
+            ><span class="m3-knob"></span></button>
+          </div>
+
+          <button type="button" class="primary-cta-btn" @click=${() => this._saveUnlockRule()}>
+            ${r.rule_id ? "Update Unlock Rule" : "Save Unlock Rule"}
+          </button>
+
+          ${rules.map(
+            (rule) => html`
+              <div class="drawer-row">
+                <div class="drawer-row-left">
+                  <ha-icon icon="${rule.is_currently_locked === false ? "mdi:lock-open-variant" : "mdi:lock"}" style="--mdc-icon-size:18px;color:${rule.is_currently_locked === false ? "#16a34a" : "#d97706"};"></ha-icon>
+                  <div>
+                    <div class="drawer-row-title">${rule.name}</div>
+                    <div class="drawer-row-sub">${rule.scope === "personal" ? `Personal (${rule.kid_id})` : `Shared (${rule.shared_mode})`} · ${rule.screen_time_device_id || rule.target_entity || "Unbound"}</div>
+                  </div>
+                </div>
+                <div class="drawer-actions">
+                  <button type="button" class="icon-mini-btn" @click=${() => (this._ruleDraft = { ...rule, kid_id: rule.kid_id || "", screen_time_device_id: rule.screen_time_device_id || "", target_entity: rule.target_entity || "" })}><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                  <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteUnlockRule(rule.rule_id)}><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                </div>
+              </div>
+            `
+          )}
+        </div>
+
+        <div class="passable-section-card">
+          <div class="passable-section-header">
+            <span class="passable-section-title">${rw.reward_id ? "Edit Reward" : "Add Reward"}</span>
+            ${rw.reward_id
+              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._rewardDraft = this._emptyRewardDraft())}>+ New</button>`
+              : ""}
+          </div>
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Reward Name</label>
+              <input class="field-input" type="text" placeholder="e.g. +20m Bonus TV" .value=${rw.name} @input=${(ev) => (this._rewardDraft = { ...rw, name: ev.target.value })} />
+            </div>
+            <div class="field-group">
+              <label class="field-label">Star Cost (⭐)</label>
+              <input class="field-input" type="number" min="1" .value=${String(rw.cost)} @input=${(ev) => (this._rewardDraft = { ...rw, cost: Number(ev.target.value) })} />
+            </div>
+          </div>
+
+          <div class="preset-chips-row">
+            ${REWARD_EMOJI_PRESETS.map(
+              (em) => html`<button type="button" class="emoji-chip ${rw.emoji === em ? "active" : ""}" @click=${() => (this._rewardDraft = { ...rw, emoji: em })}>${em}</button>`
+            )}
+          </div>
+
+          <div class="two-col-grid">
+            <div class="field-group">
+              <label class="field-label">Reward Type</label>
+              <select class="field-input" .value=${rw.reward_type} @change=${(ev) => (this._rewardDraft = { ...rw, reward_type: ev.target.value })}>
+                <option value="parent_fulfilled">Parent-Fulfilled (Push Notification)</option>
+                <option value="smart_action">Smart Home Auto-Reward</option>
+              </select>
+            </div>
+            ${rw.reward_type === "smart_action"
+              ? html`
+                  <div class="field-group">
+                    <label class="field-label">Action Kind</label>
+                    <select class="field-input" .value=${rw.action_kind} @change=${(ev) => (this._rewardDraft = { ...rw, action_kind: ev.target.value })}>
+                      <option value="screen_time_timer">Screen Time Viewing Timer</option>
+                      <option value="screen_time_bonus">Screen Time +Daily Bonus</option>
+                      <option value="nintendo_bonus">Nintendo Switch +Minutes</option>
+                    </select>
+                  </div>
+                `
+              : ""}
+          </div>
+
+          <button type="button" class="primary-cta-btn" @click=${() => this._saveReward()}>
+            ${rw.reward_id ? "Update Reward" : "Save Reward"}
+          </button>
+
+          ${rewards.map(
+            (item) => html`
+              <div class="drawer-row">
+                <div class="drawer-row-left">
+                  <span class="drawer-emoji">${item.emoji}</span>
+                  <div>
+                    <div class="drawer-row-title">${item.name}</div>
+                    <div class="drawer-row-sub">${item.cost} ⭐ · ${item.reward_type === "smart_action" ? "Auto Smart Action" : "Parent Fulfilled"}</div>
+                  </div>
+                </div>
+                <div class="drawer-actions">
+                  <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteReward(item.reward_id)}><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                </div>
+              </div>
+            `
+          )}
+        </div>
+      </div>
+    `;
+  }
+
+  _renderSetupActivityTab() {
+    const settings = this._wsData?.settings || {};
+    const cycle = this._wsData?.cycle || {};
+    const cands = this._wsData?.candidates || {};
+    const activity = this._wsData?.activity_log || [];
+
+    return html`
+      <div class="modal-tab-body">
+        <div class="segmented-tabs two-up">
+          <button type="button" class="seg-tab ${this._setupSubTab === "settings" ? "active sky" : ""}" @click=${() => (this._setupSubTab = "settings")}>Settings & PIN</button>
+          <button type="button" class="seg-tab ${this._setupSubTab === "activity" ? "active sky" : ""}" @click=${() => (this._setupSubTab = "activity")}>Activity Log (${activity.length})</button>
+        </div>
+
+        ${this._setupSubTab === "activity"
+          ? html`
+              <div class="passable-section-card">
+                ${activity.length === 0
+                  ? html`<div class="muted-hint">No chore or reward activity recorded yet.</div>`
+                  : activity.slice(0, 30).map(
+                      (ev) => html`
+                        <div class="drawer-row">
+                          <div class="drawer-row-left">
+                            <span class="drawer-emoji">${ev.emoji || "✅"}</span>
+                            <div>
+                              <div class="drawer-row-title">${ev.kid_name}: ${ev.title}</div>
+                              <div class="drawer-row-sub">${new Date(ev.timestamp).toLocaleString()}</div>
+                            </div>
+                          </div>
+                          ${ev.points_delta
+                            ? html`<span class="meta-pill stars">${ev.points_delta > 0 ? "+" : ""}${ev.points_delta} ⭐</span>`
+                            : ""}
+                        </div>
+                      `
+                    )}
+              </div>
+            `
+          : html`
+              <div class="passable-section-card">
+                <div class="passable-section-header">
+                  <span class="passable-section-title">Schedules & Trust Mode</span>
+                  <button type="button" class="inline-link-btn" @click=${() => this._seedSampleData()}>Seed Sample Templates</button>
+                </div>
+
+                <div class="two-col-grid">
+                  <div class="field-group">
+                    <label class="field-label">Daily Reset Time (HH:MM)</label>
+                    <input
+                      class="field-input"
+                      type="time"
+                      .value=${settings.daily_reset_time || "05:00"}
+                      @change=${(ev) => this._saveSettingsPatch({ daily_reset_time: ev.target.value })}
+                    />
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Default Trust Mode</label>
+                    <select
+                      class="field-input"
+                      .value=${settings.default_trust_mode || "honor_system"}
+                      @change=${(ev) => this._saveSettingsPatch({ default_trust_mode: ev.target.value })}
+                    >
+                      <option value="honor_system">Honor System (Instant)</option>
+                      <option value="parent_approval">Parent Approval Required</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="switch-control-row">
+                  <div>
+                    <div class="switch-title">Treat Today as No-School Day</div>
+                    <div class="switch-sub">Pauses school-day chores today; auto-clears tomorrow</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="m3-switch small ${cycle.manual_no_school_active ? "on" : ""}"
+                    @click=${() => this._saveSettingsPatch({ toggle_manual_no_school: !cycle.manual_no_school_active })}
+                  ><span class="m3-knob"></span></button>
+                </div>
+
+                <div class="switch-control-row">
+                  <div>
+                    <div class="switch-title">Points, Streaks & Rewards Shop</div>
+                    <div class="switch-sub">Toggle off for pure pass/fail checklist mode</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="m3-switch small ${settings.gamification_enabled !== false ? "on" : ""}"
+                    @click=${() => this._saveSettingsPatch({ gamification_enabled: !(settings.gamification_enabled !== false) })}
+                  ><span class="m3-knob"></span></button>
+                </div>
+
+                ${(cands.calendars || []).length > 0
+                  ? html`
+                      <div class="field-group">
+                        <label class="field-label">No-School / Holiday Calendars</label>
+                        <div class="kid-selector-pills">
+                          ${(cands.calendars || []).map((cal) => {
+                            const selected = (settings.no_school_calendars || []).includes(cal.entity_id);
+                            return html`
+                              <button
+                                type="button"
+                                class="kid-pick-pill ${selected ? "active" : ""}"
+                                @click=${() => {
+                                  const next = new Set(settings.no_school_calendars || []);
+                                  if (next.has(cal.entity_id)) next.delete(cal.entity_id);
+                                  else next.add(cal.entity_id);
+                                  this._saveSettingsPatch({ no_school_calendars: Array.from(next) });
+                                }}
+                              >${cal.name}</button>
+                            `;
+                          })}
+                        </div>
+                      </div>
+                    `
+                  : ""}
+
+                ${(cands.notify_services || []).length > 0
+                  ? html`
+                      <div class="field-group">
+                        <label class="field-label">Parent Push Notification Targets</label>
+                        <div class="kid-selector-pills">
+                          ${(cands.notify_services || []).map((svc) => {
+                            const selected = (settings.parent_notify_services || []).includes(svc);
+                            return html`
+                              <button
+                                type="button"
+                                class="kid-pick-pill ${selected ? "active" : ""}"
+                                @click=${() => {
+                                  const next = new Set(settings.parent_notify_services || []);
+                                  if (next.has(svc)) next.delete(svc);
+                                  else next.add(svc);
+                                  this._saveSettingsPatch({ parent_notify_services: Array.from(next) });
+                                }}
+                              >${svc.replace("notify.", "")}</button>
+                            `;
+                          })}
+                        </div>
+                      </div>
+                    `
+                  : ""}
+              </div>
+
+              <div class="passable-section-card">
+                <div class="passable-section-header">
+                  <span class="passable-section-title">Wall-Panel Parental PIN</span>
+                </div>
+                <div class="switch-control-row">
+                  <span class="switch-title">Enable 4–6 Digit Parental PIN</span>
+                  <button
+                    type="button"
+                    class="m3-switch small ${this._secPinEnabled ? "on" : ""}"
+                    @click=${() => (this._secPinEnabled = !this._secPinEnabled)}
+                  ><span class="m3-knob"></span></button>
+                </div>
+                ${this._wsData?.security?.pin_enabled
+                  ? html`
+                      <div class="field-group">
+                        <label class="field-label">Current PIN</label>
+                        <input class="field-input" type="password" inputmode="numeric" maxlength="6" .value=${this._secCurrentPin} @input=${(ev) => (this._secCurrentPin = ev.target.value)} />
+                      </div>
+                    `
+                  : ""}
+                <div class="field-group">
+                  <label class="field-label">${this._wsData?.security?.pin_enabled ? "New PIN (optional)" : "Set 4–6 Digit PIN"}</label>
+                  <input class="field-input" type="password" inputmode="numeric" maxlength="6" .value=${this._secNewPin} @input=${(ev) => (this._secNewPin = ev.target.value)} />
+                </div>
+                <button type="button" class="primary-cta-btn" @click=${() => this._saveSecuritySettings()}>
+                  Save PIN Settings
+                </button>
+              </div>
+            `}
+      </div>
+    `;
+  }
+
+  _renderPinModal() {
+    if (!this._pinModalOpen) return "";
+    const dots = [0, 1, 2, 3, 4, 5].map((i) => i < this._pinInput.length);
+    return html`
+      <div class="popup-overlay pin-overlay" @click=${() => this._closePinModal()}>
+        <div class="popup-content pin-dialog" @click=${(ev) => ev.stopPropagation()}>
+          <div class="popup-header">
+            <div class="popup-header-left">
+              <ha-icon icon="mdi:shield-lock" style="color:var(--primary-color);--mdc-icon-size:22px;"></ha-icon>
+              <h3>Parent PIN Required</h3>
+            </div>
+            <button type="button" class="close-button" @click=${() => this._closePinModal()}>
+              <ha-icon icon="mdi:close" style="--mdc-icon-size:20px;"></ha-icon>
+            </button>
+          </div>
+          <div class="pin-dots-row">
+            ${dots.map((filled, idx) =>
+              idx < 4 || filled ? html`<span class="pin-dot ${filled ? "filled" : ""}"></span>` : ""
+            )}
+          </div>
+          ${this._pinError ? html`<div class="pin-error-text">${this._pinError}</div>` : ""}
+          <div class="pin-keypad">
+            ${["1", "2", "3", "4", "5", "6", "7", "8", "9"].map(
+              (d) => html`
+                <button
+                  type="button"
+                  class="pin-key"
+                  @click=${() => {
+                    this._fireHaptic("light");
+                    if (this._pinInput.length < 6) {
+                      this._pinInput += d;
+                      this._pinError = null;
+                    }
+                  }}
+                >${d}</button>
+              `
+            )}
+            <button
+              type="button"
+              class="pin-key fn"
+              @click=${() => {
+                this._pinInput = this._pinInput.slice(0, -1);
+                this._pinError = null;
+              }}
+            >⌫</button>
+            <button
+              type="button"
+              class="pin-key"
+              @click=${() => {
+                if (this._pinInput.length < 6) this._pinInput += "0";
+              }}
+            >0</button>
+            <button type="button" class="pin-key submit" @click=${() => this._submitPinModal()}>Unlock</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // =========================================================================
+  // MAIN RENDER
+  // =========================================================================
+
+  render() {
+    if (!this.hass || !this.config) return html``;
+    const c = this.config;
+    const visibleKids = this._getVisibleKids();
+    const metrics = this._getSummaryMetrics(visibleKids);
+    const isFull = c.display_mode === "full";
+    const layout = c.layout || "board";
+
+    return html`
+      <ha-card>
+        ${c.show_header !== false
+          ? html`
+              <div class="header">
+                <div class="header-top-row">
+                  <h1 class="title">
+                    <ha-icon icon="mdi:clipboard-check-multiple-outline" style="margin-right:8px;color:#10b981;"></ha-icon>
+                    ${c.title || "Family Chores"}
+                  </h1>
+                </div>
+                <div class="header-subtitle-row">
+                  <p class="subtitle">${c.subtitle || "Smart Chores, Streaks & Screen Unlocks"}</p>
+                </div>
+              </div>
+            `
+          : ""}
+
+        ${isFull
+          ? html`
+              <div class="card-content ${c.show_header === false ? "no-header" : ""}">
+                <div class="popup-tabs">
+                  ${MODAL_TABS.map(
+                    (t) => html`
+                      <button
+                        type="button"
+                        class="popup-tab ${this._modalTab === t.id ? "active-tab" : ""}"
+                        @click=${() => (this._modalTab = t.id)}
+                      >
+                        <ha-icon icon="${t.icon}"></ha-icon>
+                        <span>${t.label}</span>
+                      </button>
+                    `
+                  )}
+                </div>
+                ${this._renderTabContent()}
+              </div>
+            `
+          : html`
+              <div class="card-content ${c.show_header === false ? "no-header" : ""}">
+                ${c.show_summary_strip !== false ? this._renderSummaryStrip(visibleKids, metrics) : ""}
+
+                ${this._wsError
+                  ? html`<div class="drawer-empty">${this._wsError}</div>`
+                  : visibleKids.length === 0
+                    ? html`
+                        <div class="drawer-empty">
+                          No active chores configured for today.
+                          ${!c.hide_admin_setup
+                            ? html`<button type="button" class="inline-link-btn" @click=${() => this._openModal("kids")}>Setup Kids & Chores →</button>`
+                            : ""}
+                        </div>
+                      `
+                    : layout === "rings"
+                      ? this._renderRingsLayout(visibleKids)
+                      : layout === "rows"
+                        ? this._renderRowsLayout(visibleKids)
+                        : layout === "tiles"
+                          ? this._renderTilesLayout(visibleKids)
+                          : this._renderBoardLayout(visibleKids)}
+
+                ${this._renderInlineDrawer(visibleKids)}
+                ${this._renderFooterStrip(metrics)}
+              </div>
+            `}
+
+        ${this._toastMsg ? html`<div class="card-toast">${this._toastMsg}</div>` : ""}
+        ${this._renderModal()}
+        ${this._renderPinModal()}
+      </ha-card>
+    `;
+  }
+
+  // =========================================================================
+  // PASSABLE DESIGN SYSTEM STYLES
+  // =========================================================================
+
+  static get styles() {
+    return css`
+      :host { display: block; }
+      ha-card {
+        border-radius: var(--ha-card-border-radius, 12px);
+        background: var(--ha-card-background, var(--card-background-color, #fff));
+        box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0, 0, 0, 0.1));
+        overflow: hidden;
+        color: var(--primary-text-color);
+        position: relative;
+      }
+      .header {
+        padding: 16px 16px 14px;
+        display: flex;
+        flex-direction: column;
+        border-bottom: 1px solid var(--divider-color, #e0e0e0);
+        margin-bottom: 12px;
+        gap: 4px;
+      }
+      .title { font-size: 24px; font-weight: 500; margin: 0; display: flex; align-items: center; }
+      .subtitle { color: var(--secondary-text-color, #757575); font-size: 14px; margin: 2px 0 0; }
+      .card-content {
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        container-type: inline-size;
+      }
+      .card-content.no-header { padding: 10px; }
+
+      /* SUMMARY STRIP */
+      .chores-summary-strip {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px 10px;
+        padding: 7px 12px;
+        border-radius: max(12px, calc(var(--ha-card-border-radius, 20px) - 8px));
+        min-height: 36px;
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.1));
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.16));
+      }
+      .chores-summary-strip.done { background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.3); }
+      .chores-summary-strip.amber { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.32); }
+      .chores-summary-strip.active { background: rgba(14, 165, 233, 0.06); border-color: rgba(14, 165, 233, 0.24); }
+      .summary-strip-left, .summary-strip-right { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+      .summary-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+      .summary-status-dot.done { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.65); }
+      .summary-status-dot.amber { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.65); }
+      .summary-status-dot.active { background: #0ea5e9; box-shadow: 0 0 6px rgba(14, 165, 233, 0.65); }
+      .strip-active-pill {
+        padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.22));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.1));
+      }
+      .strip-active-pill.done { background: rgba(34, 197, 94, 0.16); border-color: rgba(34, 197, 94, 0.4); color: #16a34a; }
+      .zone-inline-chip {
+        display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
+        font-family: inherit; font-size: 11.5px; font-weight: 700; border: 1px solid transparent;
+      }
+      .zone-inline-chip.info { background: rgba(14, 165, 233, 0.16); color: #0284c7; border-color: rgba(14, 165, 233, 0.3); }
+      .zone-inline-chip.warning { background: rgba(245, 158, 11, 0.16); color: #d97706; border-color: rgba(245, 158, 11, 0.35); }
+      .zone-inline-chip.success { background: rgba(34, 197, 94, 0.16); color: #16a34a; border-color: rgba(34, 197, 94, 0.35); }
+      .zone-inline-chip.neutral { background: rgba(128, 128, 128, 0.14); color: var(--secondary-text-color); border-color: rgba(128, 128, 128, 0.24); }
+      .zone-inline-chip.clickable { cursor: pointer; }
+      .icon-circle-btn {
+        width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+        background: var(--card-background-color, rgba(128, 128, 128, 0.1));
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.2));
+        color: var(--primary-text-color); cursor: pointer; padding: 0;
+      }
+      .icon-circle-btn.active { border-color: var(--primary-color, #0284c7); color: var(--primary-color, #0284c7); }
+      .icon-circle-btn.pin-unlocked { color: #16a34a; border-color: rgba(34, 197, 94, 0.4); background: rgba(34, 197, 94, 0.12); }
+
+      /* KID BOARD COLUMNS (DEFAULT) */
+      .kid-board-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+        gap: 10px;
+      }
+      @container (max-width: 440px) {
+        .kid-board-grid { grid-template-columns: 1fr; }
+      }
+      .kid-column-card {
+        position: relative;
+        overflow: hidden;
+        border-radius: max(12px, calc(var(--ha-card-border-radius, 20px) - 6px));
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.08));
+        border: 1px solid var(--kid-accent-border, rgba(128, 128, 128, 0.2));
+        border-top: 3px solid var(--kid-accent, #039BE5);
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .kid-column-card.all-done {
+        border-top-color: #22c55e;
+        background: rgba(34, 197, 94, 0.06);
+      }
+      .kid-col-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .kid-col-identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .kid-avatar {
+        border-radius: 50%; border: 2px solid; display: flex; align-items: center; justify-content: center;
+        font-size: 20px; flex-shrink: 0; overflow: hidden;
+      }
+      .kid-avatar img { width: 100%; height: 100%; object-fit: cover; }
+      .kid-col-titles { min-width: 0; }
+      .kid-col-name { font-size: 14.5px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .kid-col-sub { font-size: 11.5px; color: var(--secondary-text-color); font-weight: 600; }
+      .kid-col-sub .done-text { color: #16a34a; font-weight: 700; }
+      .kid-col-badges { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+      .kid-badge {
+        padding: 2px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 800;
+        border: 1px solid transparent; font-family: inherit;
+      }
+      .kid-badge.fire { background: rgba(249, 115, 22, 0.16); color: #ea580c; border-color: rgba(249, 115, 22, 0.35); }
+      .kid-badge.stars { background: rgba(234, 179, 8, 0.16); color: #ca8a04; border-color: rgba(234, 179, 8, 0.38); }
+      .kid-badge.clickable { cursor: pointer; }
+      .kid-progress-track { width: 100%; height: 5px; border-radius: 999px; background: rgba(148, 163, 184, 0.2); overflow: hidden; }
+      .kid-progress-fill { height: 100%; border-radius: 999px; transition: width 0.25s ease; }
+
+      /* CHORE TILES */
+      .kid-chore-list { display: flex; flex-direction: column; gap: 6px; }
+      .chore-tile {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 8px 10px; border-radius: 12px; cursor: pointer;
+        background: var(--card-background-color, rgba(255, 255, 255, 0.06));
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.18));
+        transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease;
+        user-select: none;
+      }
+      .chore-tile.large { min-height: 54px; padding: 10px 12px; }
+      .chore-tile:active { transform: scale(0.985); }
+      .chore-tile.completed {
+        background: rgba(34, 197, 94, 0.12);
+        border-color: rgba(34, 197, 94, 0.38);
+      }
+      .chore-tile.waiting_approval {
+        background: rgba(245, 158, 11, 0.12);
+        border-color: rgba(245, 158, 11, 0.42);
+      }
+      .chore-tile-visual {
+        width: 40px; height: 40px; border-radius: 11px; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--kid-accent-soft, rgba(128, 128, 128, 0.12));
+        overflow: hidden;
+      }
+      .chore-tile.large .chore-emoji { font-size: 26px; line-height: 1; }
+      .chore-tile.compact .chore-emoji { font-size: 20px; line-height: 1; }
+      .chore-img { width: 100%; height: 100%; object-fit: cover; }
+      .chore-tile-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+      .chore-tile-name { font-size: 13.5px; font-weight: 700; line-height: 1.25; }
+      .chore-tile.completed .chore-tile-name { text-decoration: line-through; opacity: 0.78; }
+      .chore-tile-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+      .meta-pill {
+        font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 6px;
+        background: rgba(128, 128, 128, 0.14); color: var(--secondary-text-color);
+      }
+      .meta-pill.done { background: rgba(34, 197, 94, 0.18); color: #16a34a; }
+      .meta-pill.waiting { background: rgba(245, 158, 11, 0.18); color: #d97706; }
+      .meta-pill.due { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+      .meta-pill.turn { background: rgba(14, 165, 233, 0.15); color: #0284c7; }
+      .meta-pill.stars { background: rgba(234, 179, 8, 0.18); color: #ca8a04; }
+      .chore-check-circle {
+        width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+        color: var(--secondary-text-color); background: rgba(128, 128, 128, 0.1);
+      }
+      .chore-check-circle.completed { background: #22c55e; color: #ffffff; }
+      .inline-approve-pair { display: flex; gap: 4px; }
+      .mini-approve-btn {
+        width: 28px; height: 28px; border-radius: 8px; border: none; font-weight: 800; cursor: pointer;
+      }
+      .mini-approve-btn.ok { background: #22c55e; color: #fff; }
+      .mini-approve-btn.no { background: #f59e0b; color: #fff; }
+
+      /* CONFETTI CELEBRATION */
+      @keyframes confettiBurst {
+        0% { opacity: 0; transform: translateY(14px) scale(0.7); }
+        25% { opacity: 1; transform: translateY(-6px) scale(1.1); }
+        100% { opacity: 0; transform: translateY(-34px) scale(0.95); }
+      }
+      .confetti-layer {
+        position: absolute; inset: 0; pointer-events: none; display: flex; justify-content: space-around; align-items: center; font-size: 22px; z-index: 2;
+      }
+      .confetti-layer span { animation: confettiBurst 2.2s ease-out forwards; }
+      @media (prefers-reduced-motion: reduce) { .confetti-layer { display: none; } }
+
+      /* TILES / ROWS / RINGS ALTERNATE LAYOUTS */
+      .kid-tiles-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+      .kid-summary-tile {
+        position: relative; overflow: hidden; padding: 9px 10px 11px; border-radius: 12px; cursor: pointer;
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.1));
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.16));
+      }
+      .kid-summary-tile.span-2 { grid-column: span 2; }
+      .kid-summary-tile.selected { border-color: var(--kid-accent, #0284c7); }
+      .tile-main { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+      .tile-identity { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+      .tile-text { min-width: 0; }
+      .tile-name { font-size: 13.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .tile-sub { font-size: 11.5px; color: var(--secondary-text-color); }
+      .tile-stat { font-size: 13px; font-weight: 800; }
+      .tile-hairline { position: absolute; left: 0; right: 0; bottom: 0; height: 2.5px; background: rgba(148, 163, 184, 0.15); }
+      .tile-hairline-fill { height: 100%; transition: width 0.25s ease; }
+
+      .kid-rows-stack { display: flex; flex-direction: column; gap: 6px; }
+      .kid-summary-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px;
+        border-radius: 12px; cursor: pointer;
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.1));
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.16));
+      }
+      .row-right { display: flex; align-items: center; gap: 6px; }
+
+      .kid-rings-grid { display: grid; gap: 4px; }
+      .ring-tile-btn {
+        display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px;
+        border-radius: 11px; background: transparent; border: 1px solid transparent; font-family: inherit; cursor: pointer;
+      }
+      .ring-tile-btn.selected { background: var(--secondary-background-color, rgba(128, 128, 128, 0.12)); border-color: var(--primary-color, #0284c7); }
+      .ring-wrap { position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; }
+      .ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+      .ring-val { position: absolute; font-size: 16px; }
+      .ring-name { font-size: 12px; font-weight: 700; color: var(--primary-text-color); }
+      .ring-sub { font-size: 11px; color: var(--secondary-text-color); }
+
+      /* INLINE DRAWER */
+      .chores-drawer {
+        border-top: 1px dashed var(--divider-color, rgba(128, 128, 128, 0.25));
+        padding-top: 8px; display: flex; flex-direction: column; gap: 8px;
+      }
+      .drawer-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .drawer-title { font-size: 13px; font-weight: 700; }
+      .drawer-actions { display: flex; align-items: center; gap: 5px; }
+      .drawer-manage-btn {
+        padding: 3px 9px; border-radius: 999px; border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.22));
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.1));
+        color: var(--primary-text-color); font-family: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+      }
+      .drawer-close-btn { background: none; border: none; padding: 2px; color: var(--secondary-text-color); cursor: pointer; display: inline-flex; }
+      .drawer-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+      .drawer-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        padding: 7px 9px; border-radius: 10px;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.16));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.06));
+      }
+      .drawer-row-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .drawer-emoji { font-size: 20px; flex-shrink: 0; }
+      .drawer-row-title { font-size: 12.5px; font-weight: 700; }
+      .drawer-row-sub { font-size: 11px; color: var(--secondary-text-color); }
+      .drawer-empty { padding: 14px 8px; text-align: center; font-size: 12.5px; color: var(--secondary-text-color); }
+
+      /* CHIPS, PILLS & FOOTER */
+      .kid-selector-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+      .selector-label { font-size: 11.5px; font-weight: 700; color: var(--secondary-text-color); }
+      .kid-pick-pill {
+        padding: 4px 9px; border-radius: 999px; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.25));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.08));
+        color: var(--primary-text-color);
+      }
+      .kid-pick-pill.active { background: var(--kid-accent, #0284c7); border-color: var(--kid-accent, #0284c7); color: #ffffff; }
+      .quick-chip {
+        padding: 4px 10px; border-radius: 999px; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.24));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.08)); color: var(--primary-text-color);
+      }
+      .quick-chip:disabled { opacity: 0.4; cursor: default; }
+      .quick-chip.green { background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.38); color: #16a34a; }
+      .quick-chip.amber { background: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.38); color: #d97706; }
+      .quick-chip.sky { background: rgba(14, 165, 233, 0.14); border-color: rgba(14, 165, 233, 0.38); color: #0284c7; }
+      .quick-chip.danger { background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.38); color: #dc2626; }
+
+      .engine-footer-strip {
+        padding-top: 6px; border-top: 1px solid var(--divider-color, rgba(128, 128, 128, 0.16));
+        display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px;
+      }
+      .footer-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+      .footer-chip {
+        display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.22));
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.1));
+        color: var(--secondary-text-color); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+      }
+      .footer-chip.sky { background: rgba(14, 165, 233, 0.15); border-color: rgba(14, 165, 233, 0.35); color: #0284c7; }
+      .footer-chip.amber { background: rgba(245, 158, 11, 0.15); border-color: rgba(245, 158, 11, 0.38); color: #d97706; }
+      .footer-command-link, .inline-link-btn {
+        background: none; border: none; padding: 0; font-family: inherit; font-size: 12px; font-weight: 700;
+        color: var(--primary-color, #0284c7); cursor: pointer;
+      }
+
+      /* TOAST & COMMAND CENTER MODAL */
+      .card-toast {
+        position: fixed; bottom: 18px; right: 18px; z-index: 10002; padding: 7px 14px; border-radius: 10px;
+        background: var(--ha-card-background, #1c1c1e); border: 1px solid var(--primary-color, #0284c7);
+        color: var(--primary-text-color); font-size: 12.5px; font-weight: 600;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); pointer-events: none;
+      }
+      @keyframes ha-popup-backdrop-fade-in { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes ha-popup-backdrop-fade-out { from { opacity: 1; } to { opacity: 0; } }
+      @keyframes ha-popup-dialog-in { from { opacity: 0; transform: translateY(20px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+      @keyframes ha-popup-dialog-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(12px) scale(0.97); } }
+      .popup-overlay {
+        position: fixed; inset: 0; background-color: var(--mdc-dialog-scrim-color, rgba(0, 0, 0, 0.42));
+        display: flex; justify-content: center; align-items: center; padding: 16px; box-sizing: border-box;
+        overscroll-behavior: contain; z-index: 9999; animation: ha-popup-backdrop-fade-in 220ms cubic-bezier(0.2, 0, 0, 1) forwards;
+      }
+      .popup-overlay.pin-overlay { z-index: 10001; }
+      .popup-overlay.closing { animation: ha-popup-backdrop-fade-out 170ms cubic-bezier(0.2, 0, 0, 1) forwards; }
+      .popup-content {
+        background-color: var(--ha-card-background, var(--card-background-color, #fff));
+        padding: 16px 18px 20px; border-radius: var(--ha-dialog-border-radius, var(--ha-card-border-radius, 24px));
+        width: 100%; max-width: 560px; max-height: 90vh; overflow: hidden; color: var(--primary-text-color);
+        display: flex; flex-direction: column; gap: 10px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+        border: 1px solid var(--divider-color, rgba(255, 255, 255, 0.1)); box-sizing: border-box;
+        animation: ha-popup-dialog-in 220ms cubic-bezier(0.2, 0, 0, 1) forwards;
+      }
+      .popup-content.pin-dialog { max-width: 360px; }
+      .popup-content.closing { animation: ha-popup-dialog-out 170ms cubic-bezier(0.2, 0, 0, 1) forwards; }
+      .drag-handle { display: none; }
+      @media (max-width: 560px) {
+        .popup-overlay { align-items: flex-end; padding: 0; }
+        .popup-content { max-width: 100%; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+        .drag-handle { display: block; width: 36px; height: 4px; border-radius: 999px; background: var(--divider-color, rgba(128, 128, 128, 0.4)); margin: 0 auto 4px; }
+      }
+      .popup-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--divider-color, rgba(128, 128, 128, 0.16)); }
+      .popup-header-left { display: flex; align-items: center; gap: 10px; }
+      .popup-header h3 { margin: 0; font-size: 16px; font-weight: 700; }
+      .popup-header-sub { font-size: 12px; color: var(--secondary-text-color); }
+      .close-button { background: none; border: none; padding: 4px; cursor: pointer; color: var(--primary-text-color); display: flex; border-radius: 50%; }
+      .popup-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--secondary-background-color, rgba(128, 128, 128, 0.12)); padding: 4px; border-radius: 14px; gap: 4px; }
+      .popup-tab {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+        padding: 7px 4px; border-radius: 10px; background: transparent; border: none; font-family: inherit;
+        color: var(--secondary-text-color); font-size: 11.5px; font-weight: 600; cursor: pointer;
+      }
+      .popup-tab ha-icon { --mdc-icon-size: 16px; }
+      .popup-tab.active-tab { background: var(--primary-color, #0284c7); color: #ffffff; font-weight: 700; }
+      .modal-scroll-area { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; max-height: 62vh; padding-right: 2px; }
+      .modal-tab-body { display: flex; flex-direction: column; gap: 10px; }
+
+      .passable-section-card {
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.08));
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.14));
+        border-radius: 16px; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px;
+      }
+      .passable-section-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      .passable-section-title { font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+      .muted-hint { margin: 0; font-size: 12px; color: var(--secondary-text-color); }
+      .two-col-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .field-group { display: flex; flex-direction: column; gap: 4px; }
+      .field-label { font-size: 11.5px; font-weight: 700; color: var(--secondary-text-color); }
+      .field-input {
+        width: 100%; box-sizing: border-box; padding: 7px 10px; border-radius: 9px;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.28));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.06));
+        color: var(--primary-text-color); font-family: inherit; font-size: 13px;
+      }
+      .preset-chips-row { display: flex; flex-wrap: wrap; gap: 5px; }
+      .preset-chip, .emoji-chip, .tiny-preset-btn {
+        padding: 4px 9px; border-radius: 999px; border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.25));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.08));
+        color: var(--primary-text-color); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+      }
+      .emoji-chip.active { border-color: var(--primary-color, #0284c7); background: rgba(2, 132, 199, 0.18); }
+      .color-swatches-row { display: flex; flex-wrap: wrap; gap: 7px; }
+      .color-swatch { width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+      .color-swatch.active { border-color: var(--primary-text-color); transform: scale(1.12); }
+      .day-chips { display: flex; justify-content: space-between; gap: 6px; }
+      .day-chip {
+        flex: 1; height: 32px; border-radius: 50%; border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.28));
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.1));
+        color: var(--secondary-text-color); font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+      }
+      .day-chip.selected { background: var(--primary-color, #0284c7); border-color: var(--primary-color, #0284c7); color: #ffffff; }
+      .primary-cta-btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 14px;
+        border-radius: 11px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+        border: none; background: var(--primary-color, #0284c7); color: #ffffff;
+      }
+      .icon-mini-btn {
+        width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.22));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.08));
+        color: var(--secondary-text-color); cursor: pointer; padding: 0;
+      }
+      .icon-mini-btn.danger { color: #dc2626; }
+      .switch-control-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .switch-title { font-size: 13px; font-weight: 700; }
+      .switch-sub { font-size: 11.5px; color: var(--secondary-text-color); }
+      .m3-switch {
+        width: 36px; height: 22px; border-radius: 999px; border: 1.5px solid var(--divider-color, #94a3b8);
+        background: rgba(148, 163, 184, 0.24); position: relative; cursor: pointer; padding: 0; flex-shrink: 0;
+      }
+      .m3-switch.on { background: var(--primary-color, #0284c7); border-color: var(--primary-color, #0284c7); }
+      .m3-knob {
+        position: absolute; top: 50%; left: 3px; width: 14px; height: 14px; border-radius: 50%;
+        background: #ffffff; transform: translateY(-50%); transition: left 0.18s ease;
+      }
+      .m3-switch.on .m3-knob { left: calc(100% - 17px); }
+      .segmented-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 12px; background: var(--secondary-background-color, rgba(128, 128, 128, 0.12)); }
+      .seg-tab { padding: 6px 8px; border-radius: 9px; border: none; background: transparent; color: var(--secondary-text-color); font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+      .seg-tab.active.sky { background: #0284c7; color: #ffffff; }
+
+      /* PIN KEYPAD */
+      .pin-dots-row { display: flex; justify-content: center; gap: 10px; padding: 10px 0 4px; }
+      .pin-dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--secondary-text-color); }
+      .pin-dot.filled { background: var(--primary-color, #0284c7); border-color: var(--primary-color, #0284c7); }
+      .pin-error-text { text-align: center; color: #dc2626; font-size: 12px; font-weight: 700; }
+      .pin-keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+      .pin-key {
+        height: 48px; border-radius: 12px; border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.24));
+        background: var(--secondary-background-color, rgba(128, 128, 128, 0.1));
+        color: var(--primary-text-color); font-family: inherit; font-size: 18px; font-weight: 700; cursor: pointer;
+      }
+      .pin-key.submit { background: var(--primary-color, #0284c7); border-color: var(--primary-color, #0284c7); color: #ffffff; font-size: 14px; }
+      .pin-key.fn { font-size: 16px; }
+    `;
+  }
+}
+
+class PassableChoresCardEditor extends LitElement {
+  static get properties() {
+    return {
+      hass: { attribute: false },
+      config: { state: true },
+    };
+  }
+
+  setConfig(config) {
+    this.config = { ...config };
+  }
+
+  _updateConfig(patch) {
+    const next = { ...(this.config || {}), ...patch };
+    this.config = next;
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: next },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  render() {
+    if (!this.hass || !this.config) return html``;
+    const c = this.config;
+    return html`
+      <div class="editor-container">
+        <div class="section-box">
+          <h3>Appearance & Layout</h3>
+          <ha-textfield
+            label="Card Title"
+            .value=${c.title ?? "Family Chores"}
+            @input=${(ev) => this._updateConfig({ title: ev.target.value })}
+          ></ha-textfield>
+          <ha-textfield
+            label="Card Subtitle"
+            .value=${c.subtitle ?? "Smart Chores, Streaks & Screen Unlocks"}
+            @input=${(ev) => this._updateConfig({ subtitle: ev.target.value })}
+          ></ha-textfield>
+
+          <div class="form-group">
+            <label class="form-label">Display Mode</label>
+            <select class="custom-select" .value=${c.display_mode || "summary"} @change=${(ev) => this._updateConfig({ display_mode: ev.target.value })}>
+              <option value="summary">Summary Card + Popup Command Center (Recommended)</option>
+              <option value="full">Full Embedded Command Center</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Layout Style</label>
+            <select class="custom-select" .value=${c.layout || "board"} @change=${(ev) => this._updateConfig({ layout: ev.target.value })}>
+              <option value="board">Kid Columns Board (Recommended)</option>
+              <option value="tiles">Compact 2-Column Kid Tiles</option>
+              <option value="rows">Stacked Kid Rows</option>
+              <option value="rings">Circular Progress Rings</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Chore Tile Size</label>
+            <select class="custom-select" .value=${c.tile_size || "large"} @change=${(ev) => this._updateConfig({ tile_size: ev.target.value })}>
+              <option value="large">Large Picture / Emoji Tiles (Kid-Friendly)</option>
+              <option value="compact">Compact Rows</option>
+            </select>
+          </div>
+
+          <div class="switch-row">
+            <label class="form-label">Show Card Header</label>
+            <ha-switch .checked=${c.show_header === true} @change=${(ev) => this._updateConfig({ show_header: ev.target.checked })}></ha-switch>
+          </div>
+          <div class="switch-row">
+            <label class="form-label">Show Top Summary Strip</label>
+            <ha-switch .checked=${c.show_summary_strip !== false} @change=${(ev) => this._updateConfig({ show_summary_strip: ev.target.checked })}></ha-switch>
+          </div>
+          <div class="switch-row">
+            <label class="form-label">Show Bottom Footer Strip</label>
+            <ha-switch .checked=${c.show_footer_strip !== false} @change=${(ev) => this._updateConfig({ show_footer_strip: ev.target.checked })}></ha-switch>
+          </div>
+          <div class="switch-row">
+            <label class="form-label">Hide Kids With 0 Chores Today</label>
+            <ha-switch .checked=${c.hide_inactive_kids !== false} @change=${(ev) => this._updateConfig({ hide_inactive_kids: ev.target.checked })}></ha-switch>
+          </div>
+        </div>
+
+        <div class="section-box">
+          <h3>Wall Panel & Access Control</h3>
+          <div class="form-group">
+            <label class="form-label">Parental PIN Requirement</label>
+            <select
+              class="custom-select"
+              .value=${String(c.require_pin ?? "auto")}
+              @change=${(ev) => {
+                const v = ev.target.value;
+                this._updateConfig({ require_pin: v === "true" ? true : v === "false" ? false : "auto" });
+              }}
+            >
+              <option value="auto">Auto (Use Integration PIN Settings)</option>
+              <option value="true">Always Enforce on This Card</option>
+              <option value="false">Bypass on This Card (Trusted Parent View)</option>
+            </select>
+          </div>
+          <div class="switch-row">
+            <label class="form-label">Hide Admin Setup Controls (Kiosk)</label>
+            <ha-switch .checked=${c.hide_admin_setup === true} @change=${(ev) => this._updateConfig({ hide_admin_setup: ev.target.checked })}></ha-switch>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  static get styles() {
+    return css`
+      .editor-container { display: flex; flex-direction: column; gap: 14px; }
+      .section-box { border: 1px solid var(--divider-color, #e0e0e0); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+      .section-box h3 { margin: 0; font-size: 14px; font-weight: 700; }
+      .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .form-group { display: flex; flex-direction: column; gap: 4px; }
+      .form-label { font-size: 13px; color: var(--primary-text-color); }
+      .custom-select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: var(--primary-text-color); font-family: inherit; }
+    `;
+  }
+}
+
+if (!customElements.get("passable-chores-card")) {
+  customElements.define("passable-chores-card", PassableChoresCard);
+}
+if (!customElements.get("passable-chores-card-editor")) {
+  customElements.define("passable-chores-card-editor", PassableChoresCardEditor);
+}
+
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: "passable-chores-card",
+  name: "Passable Chores Card",
+  description:
+    "Passable design-system kids chore board with large emoji tiles, streaks, star rewards, parent approval, and Screen Time Engine unlocks.",
+  preview: true,
+  documentationURL: "https://github.com/GBear09/passable-smart-chores-engine",
+});

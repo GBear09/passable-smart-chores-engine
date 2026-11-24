@@ -1,0 +1,198 @@
+complete_chore:
+  name: Complete Chore
+  description: Marks a chore as completed (or waiting for parent approval) for a child.
+  fields:
+    chore_id:
+      name: Chore ID
+      description: The unique ID of the chore.
+      required: true
+      selector:
+        text: {}
+    kid_id:
+      name: Kid ID
+      description: The unique ID of the child.
+      required: true
+      selector:
+        text: {}
+    by_parent:
+      name: Completed by Parent
+      description: Bypass parent approval queue and mark completed immediately.
+      default: false
+      selector:
+        boolean: {}
+
+uncomplete_chore:
+  name: Uncomplete Chore
+  description: Reverts a chore completion back to pending and adjusts points/unlocks if needed.
+  fields:
+    chore_id:
+      name: Chore ID
+      description: The unique ID of the chore.
+      required: true
+      selector:
+        text: {}
+    kid_id:
+      name: Kid ID
+      description: The unique ID of the child.
+      required: true
+      selector:
+        text: {}
+
+approve_chore:
+  name: Approve Chore
+  description: Approves a chore currently waiting in the parent approval queue.
+  fields:
+    chore_id:
+      name: Chore ID
+      description: The unique ID of the chore.
+      required: true
+      selector:
+        text: {}
+    kid_id:
+      name: Kid ID
+      description: The unique ID of the child.
+      required: true
+      selector:
+        text: {}
+    parent_name:
+      name: Approved By
+      description: Optional parent name for the activity log.
+      required: false
+      selector:
+        text: {}
+
+reject_chore:
+  name: Reject Chore (Try Again)
+  description: Returns a waiting-approval chore back to pending so the child can try again.
+  fields:
+    chore_id:
+      name: Chore ID
+      description: The unique ID of the chore.
+      required: true
+      selector:
+        text: {}
+    kid_id:
+      name: Kid ID
+      description: The unique ID of the child.
+      required: true
+      selector:
+        text: {}
+    note:
+      name: Note
+      description: Optional feedback note.
+      required: false
+      selector:
+        text: {}
+
+approve_all_pending:
+  name: Approve All Pending Chores
+  description: Approves all chores waiting in the parent approval queue.
+  fields:
+    kid_id:
+      name: Kid ID
+      description: Optional child ID to approve only one child's pending chores.
+      required: false
+      selector:
+        text: {}
+
+redeem_reward:
+  name: Redeem Reward
+  description: Redeems a reward from a child's star bank.
+  fields:
+    reward_id:
+      name: Reward ID
+      description: The unique ID of the reward.
+      required: true
+      selector:
+        text: {}
+    kid_id:
+      name: Kid ID
+      description: The unique ID of the child.
+      required: true
+      selector:
+        text: {}
+
+resolve_reward_redemption:
+  name: Resolve Reward Redemption
+  description: Approves or denies (with star refund) a pending reward request.
+  fields:
+    redemption_id:
+      name: Redemption ID
+      description: The ID of the pending redemption request.
+      required: true
+      selector:
+        text: {}
+    approved:
+      name: Approved
+      description: True to approve and fulfill, False to deny and refund stars.
+      required: true
+      selector:
+        boolean: {}
+
+adjust_points:
+  name: Adjust Kid Star Points
+  description: Adds or deducts star points from a child's bank.
+  fields:
+    kid_id:
+      name: Kid ID
+      description: The unique ID of the child.
+      required: true
+      selector:
+        text: {}
+    delta:
+      name: Points Delta
+      description: Positive or negative point adjustment.
+      required: true
+      selector:
+        number:
+          min: -1000
+          max: 1000
+          mode: box
+    reason:
+      name: Reason
+      description: Optional description for the activity log.
+      required: false
+      default: Parent Adjustment
+      selector:
+        text: {}
+
+reset_chores:
+  name: Reset Chores
+  description: Resets daily, weekly, or all chore completions and re-evaluates device unlocks.
+  fields:
+    scope:
+      name: Scope
+      description: Which chores to reset.
+      default: daily
+      selector:
+        select:
+          options:
+            - daily
+            - weekly
+            - all
+    kid_id:
+      name: Kid ID
+      description: Optional child ID to reset only one child's chores.
+      required: false
+      selector:
+        text: {}
+
+rotate_chore:
+  name: Rotate Weekly Chore Turn
+  description: Manually shifts a weekly rotating chore to the next assigned child.
+  fields:
+    chore_id:
+      name: Chore ID
+      description: The unique ID of the rotating chore.
+      required: true
+      selector:
+        text: {}
+    steps:
+      name: Steps
+      description: Number of turns to advance (or negative to rewind).
+      default: 1
+      selector:
+        number:
+          min: -10
+          max: 10
+          mode: box
