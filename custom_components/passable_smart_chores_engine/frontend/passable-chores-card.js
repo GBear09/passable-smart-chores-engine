@@ -3,10 +3,10 @@
  * Bundled companion card for Passable Smart Chores Engine
  * https://github.com/GBear09/passable-smart-chores-engine
  *
- * Version 1.0.0 - Passable Suite Summary Card + Kid Columns Board + 4-Tab Command Center
+ * Version 1.0.1 - Streamlined Command Center, Dropdowns & User-Based Admin Visibility
  */
 
-const CARD_VERSION = "1.0.0";
+const CARD_VERSION = "1.0.1";
 const ENGINE_DOMAIN = "passable_smart_chores_engine";
 
 const LitElement = Object.getPrototypeOf(
@@ -99,6 +99,8 @@ class PassableChoresCard extends LitElement {
       hide_inactive_kids: true,
       kids_filter: [],
       require_pin: "auto",
+      admin_visibility: "everyone",
+      admin_users: [],
       hide_admin_setup: false,
     };
   }
@@ -116,14 +118,22 @@ class PassableChoresCard extends LitElement {
       _modalOpen: { state: true },
       _modalTab: { state: true },
       _choreFilterKid: { state: true },
+      _choreFormOpen: { state: true },
+      _choreMoreOpen: { state: true },
       _editingChoreId: { state: true },
       _choreDraft: { state: true },
+      _kidFormOpen: { state: true },
+      _kidCustomAvatar: { state: true },
       _editingKidId: { state: true },
       _kidDraft: { state: true },
+      _unlocksSubTab: { state: true },
+      _ruleFormOpen: { state: true },
       _editingRuleId: { state: true },
       _ruleDraft: { state: true },
+      _rewardFormOpen: { state: true },
       _editingRewardId: { state: true },
       _rewardDraft: { state: true },
+      _emojiPickerTarget: { state: true },
       _setupSubTab: { state: true },
       _secCurrentPin: { state: true },
       _secNewPin: { state: true },
@@ -153,14 +163,22 @@ class PassableChoresCard extends LitElement {
     this._modalOpen = false;
     this._modalTab = "chores";
     this._choreFilterKid = "all";
+    this._choreFormOpen = false;
+    this._choreMoreOpen = false;
     this._editingChoreId = null;
     this._choreDraft = this._emptyChoreDraft();
+    this._kidFormOpen = false;
+    this._kidCustomAvatar = false;
     this._editingKidId = null;
     this._kidDraft = this._emptyKidDraft();
+    this._unlocksSubTab = "unlocks";
+    this._ruleFormOpen = false;
     this._editingRuleId = null;
     this._ruleDraft = this._emptyRuleDraft();
+    this._rewardFormOpen = false;
     this._editingRewardId = null;
     this._rewardDraft = this._emptyRewardDraft();
+    this._emojiPickerTarget = null;
     this._setupSubTab = "settings";
 
     this._secCurrentPin = "";
@@ -277,6 +295,15 @@ class PassableChoresCard extends LitElement {
     const layout = ["board", "tiles", "rows", "rings"].includes(config.layout)
       ? config.layout
       : "board";
+    const legacyHide = config.hide_admin_setup === true;
+    const hasAdminUsers = Array.isArray(config.admin_users) && config.admin_users.length > 0;
+    const adminVisibility = ["everyone", "admins_only", "selected_users", "hidden"].includes(config.admin_visibility)
+      ? config.admin_visibility
+      : legacyHide
+        ? "hidden"
+        : hasAdminUsers
+          ? "selected_users"
+          : "everyone";
     this.config = {
       title: config.title !== undefined ? config.title : "Family Chores",
       subtitle:
@@ -295,8 +322,13 @@ class PassableChoresCard extends LitElement {
       hide_inactive_kids: config.hide_inactive_kids !== false,
       kids_filter: Array.isArray(config.kids_filter) ? config.kids_filter : [],
       require_pin: config.require_pin !== undefined ? config.require_pin : "auto",
-      hide_admin_setup: config.hide_admin_setup === true,
+      admin_visibility: adminVisibility,
+      admin_users: Array.isArray(config.admin_users) ? config.admin_users : [],
+      hide_admin_setup: adminVisibility === "hidden",
       ...config,
+      admin_visibility: adminVisibility,
+      admin_users: Array.isArray(config.admin_users) ? config.admin_users : [],
+      hide_admin_setup: adminVisibility === "hidden",
     };
   }
 
@@ -766,6 +798,9 @@ class PassableChoresCard extends LitElement {
           trust_mode: this._kidDraft.trust_mode || "inherit",
         });
         this._editingKidId = null;
+        this._kidFormOpen = false;
+        this._kidCustomAvatar = false;
+        this._emojiPickerTarget = null;
         this._kidDraft = this._emptyKidDraft();
         this._fireHaptic("success");
         this._showToast("Child profile saved");
@@ -814,6 +849,9 @@ class PassableChoresCard extends LitElement {
           trust_mode: d.trust_mode || "inherit",
         });
         this._editingChoreId = null;
+        this._choreFormOpen = false;
+        this._choreMoreOpen = false;
+        this._emojiPickerTarget = null;
         this._choreDraft = this._emptyChoreDraft();
         this._fireHaptic("success");
         this._showToast("Chore saved");
@@ -875,6 +913,7 @@ class PassableChoresCard extends LitElement {
           respect_screen_time_schedules: r.respect_screen_time_schedules !== false,
         });
         this._editingRuleId = null;
+        this._ruleFormOpen = false;
         this._ruleDraft = this._emptyRuleDraft();
         this._fireHaptic("success");
         this._showToast("Device unlock rule saved");
@@ -925,6 +964,8 @@ class PassableChoresCard extends LitElement {
           enabled: true,
         });
         this._editingRewardId = null;
+        this._rewardFormOpen = false;
+        this._emojiPickerTarget = null;
         this._rewardDraft = this._emptyRewardDraft();
         this._fireHaptic("success");
         this._showToast("Reward saved");
@@ -1214,6 +1255,24 @@ class PassableChoresCard extends LitElement {
   // DATA COMPUTATION & SUMMARY METRICS
   // =========================================================================
 
+  _canViewAdminControls() {
+    if (!this.hass) return false;
+    const mode = this.config?.admin_visibility || (this.config?.hide_admin_setup ? "hidden" : "everyone");
+    if (mode === "hidden") return false;
+    if (mode === "admins_only") return this.hass.user?.is_admin === true;
+    if (mode === "selected_users") {
+      const allowed = Array.isArray(this.config?.admin_users) ? this.config.admin_users : [];
+      const uid = this.hass.user?.id;
+      const uname = this.hass.user?.name;
+      return Boolean((uid && allowed.includes(uid)) || (uname && allowed.includes(uname)));
+    }
+    return true;
+  }
+
+  _canApproveOnCard() {
+    return this._canViewAdminControls() || Boolean(this._wsData?.security?.pin_enabled);
+  }
+
   _getVisibleKids() {
     const allKids = this._wsData?.kids || [];
     const filterIds = Array.isArray(this.config?.kids_filter) && this.config.kids_filter.length > 0
@@ -1221,10 +1280,10 @@ class PassableChoresCard extends LitElement {
       : null;
 
     return allKids.filter((kid) => {
+      if (!kid.enabled) return false;
       if (filterIds && !filterIds.has(kid.kid_id)) return false;
-      if (this.config?.hide_inactive_kids !== false) {
-        if (!kid.enabled) return false;
-        if ((kid.board || []).length === 0) return false;
+      if (this.config?.hide_inactive_kids !== false && (kid.board || []).length === 0) {
+        return false;
       }
       return true;
     });
@@ -1310,7 +1369,7 @@ class PassableChoresCard extends LitElement {
               `
             : ""}
 
-          ${metrics.pendingCount > 0
+          ${metrics.pendingCount > 0 && this._canApproveOnCard()
             ? html`
                 <button
                   type="button"
@@ -1347,7 +1406,7 @@ class PassableChoresCard extends LitElement {
               `
             : ""}
 
-          ${!this.config?.hide_admin_setup
+          ${this._canViewAdminControls()
             ? html`
                 <button
                   type="button"
@@ -1426,22 +1485,28 @@ class PassableChoresCard extends LitElement {
 
         <div class="chore-tile-right">
           ${isWaiting
-            ? html`
-                <div class="inline-approve-pair" @click=${(ev) => ev.stopPropagation()}>
-                  <button
-                    type="button"
-                    class="mini-approve-btn ok"
-                    @click=${(ev) => this._approveChore(item.chore_id, kid.kid_id, ev)}
-                    title="Approve chore"
-                  >✓</button>
-                  <button
-                    type="button"
-                    class="mini-approve-btn no"
-                    @click=${(ev) => this._rejectChore(item.chore_id, kid.kid_id, ev)}
-                    title="Send back (Try Again)"
-                  >↺</button>
-                </div>
-              `
+            ? this._canApproveOnCard()
+              ? html`
+                  <div class="inline-approve-pair" @click=${(ev) => ev.stopPropagation()}>
+                    <button
+                      type="button"
+                      class="mini-approve-btn ok"
+                      @click=${(ev) => this._approveChore(item.chore_id, kid.kid_id, ev)}
+                      title="Approve chore"
+                    >✓</button>
+                    <button
+                      type="button"
+                      class="mini-approve-btn no"
+                      @click=${(ev) => this._rejectChore(item.chore_id, kid.kid_id, ev)}
+                      title="Send back (Try Again)"
+                    >↺</button>
+                  </div>
+                `
+              : html`
+                  <div class="chore-check-circle waiting" title="Waiting for parent approval">
+                    <ha-icon icon="mdi:clock-outline" style="--mdc-icon-size:18px;"></ha-icon>
+                  </div>
+                `
             : html`
                 <div class="chore-check-circle ${item.status}">
                   <ha-icon
@@ -1520,7 +1585,9 @@ class PassableChoresCard extends LitElement {
               </div>
 
               <div class="kid-chore-list">
-                ${(kid.board || []).map((item) => this._renderChoreTile(kid, item, isLarge))}
+                ${(kid.board || []).length > 0
+                  ? (kid.board || []).map((item) => this._renderChoreTile(kid, item, isLarge))
+                  : html`<div class="kid-empty-board">No chores scheduled today</div>`}
               </div>
             </div>
           `;
@@ -1851,7 +1918,7 @@ class PassableChoresCard extends LitElement {
                 </button>
               `
             : ""}
-          ${metrics.pendingCount > 0
+          ${metrics.pendingCount > 0 && this._canApproveOnCard()
             ? html`
                 <button type="button" class="footer-chip amber" @click=${() => this._toggleDrawer("approvals")}>
                   ⏳ ${metrics.pendingCount} Waiting
@@ -1863,7 +1930,7 @@ class PassableChoresCard extends LitElement {
             : ""}
         </div>
 
-        ${!this.config?.hide_admin_setup
+        ${this._canViewAdminControls()
           ? html`
               <button type="button" class="footer-command-link" @click=${() => this._openModal("chores")}>
                 Command Center →
@@ -1875,8 +1942,61 @@ class PassableChoresCard extends LitElement {
   }
 
   // =========================================================================
-  // 4-TAB COMMAND CENTER MODAL
+  // 4-TAB COMMAND CENTER MODAL (STREAMLINED LIST-FIRST + DROPDOWNS)
   // =========================================================================
+
+  _renderEmojiPopoverButton(targetKey, currentValue, presets, onSelect, allowCustomUrl = false) {
+    const isOpen = this._emojiPickerTarget === targetKey;
+    const isUrl = String(currentValue || "").startsWith("/") || String(currentValue || "").startsWith("http");
+    const displayEmoji = isUrl ? "🖼️" : currentValue || presets[0];
+
+    return html`
+      <div class="emoji-picker-wrap" @click=${(ev) => ev.stopPropagation()}>
+        <button
+          type="button"
+          class="emoji-trigger-btn ${isOpen ? "open" : ""}"
+          @click=${(ev) => {
+            ev.stopPropagation();
+            this._emojiPickerTarget = isOpen ? null : targetKey;
+          }}
+          title="Choose icon"
+        >
+          <span class="emoji-trigger-val">${displayEmoji}</span>
+          <span class="emoji-trigger-caret">▾</span>
+        </button>
+
+        ${isOpen
+          ? html`
+              <div class="emoji-popover" @click=${(ev) => ev.stopPropagation()}>
+                <div class="emoji-popover-grid">
+                  ${presets.map(
+                    (em) => html`
+                      <button
+                        type="button"
+                        class="emoji-chip ${currentValue === em ? "active" : ""}"
+                        @click=${() => {
+                          onSelect(em);
+                          this._emojiPickerTarget = null;
+                        }}
+                      >${em}</button>
+                    `
+                  )}
+                </div>
+                <div class="emoji-popover-custom">
+                  <input
+                    class="field-input"
+                    type="text"
+                    placeholder=${allowCustomUrl ? "Emoji or /local/img.png" : "Custom emoji"}
+                    .value=${currentValue || ""}
+                    @input=${(ev) => onSelect(ev.target.value)}
+                  />
+                </div>
+              </div>
+            `
+          : ""}
+      </div>
+    `;
+  }
 
   _renderModal() {
     if (!this._modalOpen && this.config?.display_mode !== "full") return "";
@@ -1886,7 +2006,10 @@ class PassableChoresCard extends LitElement {
       <div class="popup-overlay" @click=${() => this._closeModal()}>
         <div
           class="popup-content"
-          @click=${(ev) => ev.stopPropagation()}
+          @click=${(ev) => {
+            ev.stopPropagation();
+            if (this._emojiPickerTarget) this._emojiPickerTarget = null;
+          }}
           @touchstart=${(ev) => this._handlePopupTouchStart(ev)}
           @touchmove=${(ev) => this._handlePopupTouchMove(ev)}
           @touchend=${() => this._handlePopupTouchEnd()}
@@ -1914,6 +2037,7 @@ class PassableChoresCard extends LitElement {
                   class="popup-tab ${this._modalTab === t.id ? "active-tab" : ""}"
                   @click=${() => {
                     this._fireHaptic("light");
+                    this._emojiPickerTarget = null;
                     this._modalTab = t.id;
                   }}
                 >
@@ -1949,237 +2073,294 @@ class PassableChoresCard extends LitElement {
 
     return html`
       <div class="modal-tab-body">
-        <div class="passable-section-card">
-          <div class="passable-section-header">
-            <span class="passable-section-title">${d.chore_id ? "Edit Chore" : "Add Chore"}</span>
-            ${d.chore_id
-              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._choreDraft = this._emptyChoreDraft())}>+ New</button>`
-              : ""}
-          </div>
-
-          ${!d.chore_id
-            ? html`
-                <div class="preset-chips-row">
-                  ${CHORE_STARTER_TEMPLATES.map(
-                    (tpl) => html`
-                      <button
-                        type="button"
-                        class="preset-chip"
-                        @click=${() => {
-                          this._choreDraft = {
-                            ...this._emptyChoreDraft(),
-                            ...tpl,
-                            assigned_kids: kids.filter((k) => k.enabled).map((k) => k.kid_id),
-                          };
-                        }}
-                      >${tpl.emoji} ${tpl.name}</button>
-                    `
-                  )}
-                </div>
-              `
-            : ""}
-
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Chore Name</label>
-              <input
-                class="field-input"
-                type="text"
-                placeholder="e.g. Brush Teeth"
-                .value=${d.name}
-                @input=${(ev) => (this._choreDraft = { ...d, name: ev.target.value })}
-              />
-            </div>
-            <div class="field-group">
-              <label class="field-label">Emoji Icon</label>
-              <input
-                class="field-input"
-                type="text"
-                .value=${d.emoji}
-                @input=${(ev) => (this._choreDraft = { ...d, emoji: ev.target.value })}
-              />
-            </div>
-          </div>
-
-          <div class="preset-chips-row">
-            ${CHORE_EMOJI_PRESETS.map(
-              (em) => html`
-                <button
-                  type="button"
-                  class="emoji-chip ${d.emoji === em ? "active" : ""}"
-                  @click=${() => (this._choreDraft = { ...d, emoji: em })}
-                >${em}</button>
-              `
-            )}
-          </div>
-
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Tier</label>
-              <select
-                class="field-input"
-                .value=${d.tier}
-                @change=${(ev) => (this._choreDraft = { ...d, tier: ev.target.value })}
-              >
-                <option value="required">Required (Gates Unlocks)</option>
-                <option value="bonus">Bonus (Extra Stars)</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Schedule</label>
-              <select
-                class="field-input"
-                .value=${d.schedule_type}
-                @change=${(ev) => (this._choreDraft = { ...d, schedule_type: ev.target.value })}
-              >
-                <option value="daily">Daily</option>
-                <option value="school_days">School Days (Mon–Fri, respects holidays)</option>
-                <option value="weekends">Weekends (+ No-School Days)</option>
-                <option value="weekly">Weekly (Flexible or Fixed Day)</option>
-                <option value="custom_days">Custom Days</option>
-              </select>
-            </div>
-          </div>
-
-          ${d.schedule_type === "custom_days"
-            ? html`
-                <div class="day-chips">
-                  ${DAYS_LIST.map((day, idx) => {
-                    const sel = (d.custom_days || []).includes(day);
-                    return html`
-                      <button
-                        type="button"
-                        class="day-chip ${sel ? "selected" : ""}"
-                        @click=${() => {
-                          const set = new Set(d.custom_days || []);
-                          if (set.has(day)) set.delete(day);
-                          else set.add(day);
-                          this._choreDraft = { ...d, custom_days: DAYS_LIST.filter((x) => set.has(x)) };
-                        }}
-                      >${DAYS_SHORT[idx]}</button>
-                    `;
-                  })}
-                </div>
-              `
-            : ""}
-
-          ${d.schedule_type === "weekly"
-            ? html`
-                <div class="two-col-grid">
-                  <div class="field-group">
-                    <label class="field-label">Required By Day</label>
-                    <select
-                      class="field-input"
-                      .value=${d.weekly_due_day || ""}
-                      @change=${(ev) => (this._choreDraft = { ...d, weekly_due_day: ev.target.value })}
-                    >
-                      <option value="">Use Global Default (${this._wsData?.cycle?.weekly_due_day || "sat"})</option>
-                      ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
-                    </select>
-                  </div>
-                  <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
-                    <span class="switch-title">Show Early All Week</span>
-                    <button
-                      type="button"
-                      class="m3-switch small ${d.weekly_flexible ? "on" : ""}"
-                      @click=${() => (this._choreDraft = { ...d, weekly_flexible: !d.weekly_flexible })}
-                    ><span class="m3-knob"></span></button>
-                  </div>
-                </div>
-              `
-            : ""}
-
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Assignment Mode</label>
-              <select
-                class="field-input"
-                .value=${d.assignment_mode}
-                @change=${(ev) => (this._choreDraft = { ...d, assignment_mode: ev.target.value })}
-              >
-                <option value="each">Each Selected Kid</option>
-                <option value="rotate_weekly">Take Turns Weekly</option>
-                <option value="up_for_grabs">Up for Grabs (Bonus)</option>
-              </select>
-            </div>
-            <div class="field-group">
-              <label class="field-label">Star Points (⭐)</label>
-              <input
-                class="field-input"
-                type="number"
-                min="0"
-                max="500"
-                .value=${String(d.points)}
-                @input=${(ev) => (this._choreDraft = { ...d, points: Number(ev.target.value) })}
-              />
-            </div>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">Trust / Approval Override</label>
-            <select
-              class="field-input"
-              .value=${d.trust_mode}
-              @change=${(ev) => (this._choreDraft = { ...d, trust_mode: ev.target.value })}
-            >
-              <option value="inherit">Inherit Kid / Global Default</option>
-              <option value="honor_system">Always Honor System</option>
-              <option value="parent_approval">Always Require Parent Approval</option>
-            </select>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">Assigned Kids</label>
-            <div class="kid-selector-pills">
-              ${kids.map((k) => {
-                const sel = (d.assigned_kids || []).includes(k.kid_id);
-                return html`
+        ${this._choreFormOpen
+          ? html`
+              <div class="passable-section-card editor-card">
+                <div class="passable-section-header">
+                  <span class="passable-section-title">${d.chore_id ? "Edit Chore" : "New Chore"}</span>
                   <button
                     type="button"
-                    class="kid-pick-pill ${sel ? "active" : ""}"
-                    style="--kid-accent:${k.accent_color};"
+                    class="inline-link-btn muted"
                     @click=${() => {
-                      const set = new Set(d.assigned_kids || []);
-                      if (set.has(k.kid_id)) set.delete(k.kid_id);
-                      else set.add(k.kid_id);
-                      this._choreDraft = { ...d, assigned_kids: Array.from(set) };
+                      this._choreFormOpen = false;
+                      this._choreMoreOpen = false;
+                      this._emojiPickerTarget = null;
+                      this._choreDraft = this._emptyChoreDraft();
                     }}
-                  >${k.avatar} ${k.name}</button>
-                `;
-              })}
-            </div>
-          </div>
+                  >Cancel</button>
+                </div>
 
-          <button type="button" class="primary-cta-btn" @click=${() => this._saveChore()}>
-            ${d.chore_id ? "Update Chore" : "Save Chore"}
-          </button>
-        </div>
+                ${!d.chore_id
+                  ? html`
+                      <div class="field-group">
+                        <select
+                          class="field-input"
+                          @change=${(ev) => {
+                            const idx = ev.target.value;
+                            if (idx === "") return;
+                            const tpl = CHORE_STARTER_TEMPLATES[Number(idx)];
+                            if (tpl) {
+                              this._choreDraft = {
+                                ...this._emptyChoreDraft(),
+                                ...tpl,
+                                assigned_kids: kids.filter((k) => k.enabled).map((k) => k.kid_id),
+                              };
+                            }
+                            ev.target.value = "";
+                          }}
+                        >
+                          <option value="">Quick-fill from a starter template…</option>
+                          ${CHORE_STARTER_TEMPLATES.map(
+                            (tpl, idx) => html`
+                              <option value="${idx}">${tpl.emoji} ${tpl.name} (${tpl.schedule_type.replace("_", " ")} · ${tpl.points} ⭐)</option>
+                            `
+                          )}
+                        </select>
+                      </div>
+                    `
+                  : ""}
 
-        <div class="passable-section-card">
-          <div class="passable-section-header">
-            <span class="passable-section-title">Configured Chores (${filtered.length})</span>
-            <div class="drawer-actions">
-              <button type="button" class="tiny-preset-btn" @click=${() => this._resetChores("daily")}>Reset Daily</button>
-              <button type="button" class="tiny-preset-btn" @click=${() => this._resetChores("weekly")}>Reset Weekly</button>
-            </div>
-          </div>
+                <div class="icon-name-row">
+                  <div class="field-group">
+                    <label class="field-label">Icon</label>
+                    ${this._renderEmojiPopoverButton(
+                      "chore",
+                      d.emoji,
+                      CHORE_EMOJI_PRESETS,
+                      (val) => (this._choreDraft = { ...d, emoji: val })
+                    )}
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Chore Name</label>
+                    <input
+                      class="field-input"
+                      type="text"
+                      placeholder="e.g. Brush Teeth"
+                      .value=${d.name}
+                      @input=${(ev) => (this._choreDraft = { ...d, name: ev.target.value })}
+                    />
+                  </div>
+                </div>
 
-          <div class="kid-selector-pills">
-            <button type="button" class="kid-pick-pill ${this._choreFilterKid === "all" ? "active" : ""}" @click=${() => (this._choreFilterKid = "all")}>All</button>
-            ${kids.map(
-              (k) => html`
+                <div class="two-col-grid">
+                  <div class="field-group">
+                    <label class="field-label">Schedule</label>
+                    <select
+                      class="field-input"
+                      .value=${d.schedule_type}
+                      @change=${(ev) => (this._choreDraft = { ...d, schedule_type: ev.target.value })}
+                    >
+                      <option value="daily">Daily</option>
+                      <option value="school_days">School Days (Mon–Fri)</option>
+                      <option value="weekends">Weekends (+ No-School)</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="custom_days">Custom Days</option>
+                    </select>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Assignment</label>
+                    <select
+                      class="field-input"
+                      .value=${d.assignment_mode}
+                      @change=${(ev) => (this._choreDraft = { ...d, assignment_mode: ev.target.value })}
+                    >
+                      <option value="each">Each Selected Kid</option>
+                      <option value="rotate_weekly">Take Turns Weekly</option>
+                      <option value="up_for_grabs">Up for Grabs (Bonus)</option>
+                    </select>
+                  </div>
+                </div>
+
+                ${d.schedule_type === "custom_days"
+                  ? html`
+                      <div class="day-chips">
+                        ${DAYS_LIST.map((day, idx) => {
+                          const sel = (d.custom_days || []).includes(day);
+                          return html`
+                            <button
+                              type="button"
+                              class="day-chip ${sel ? "selected" : ""}"
+                              @click=${() => {
+                                const set = new Set(d.custom_days || []);
+                                if (set.has(day)) set.delete(day);
+                                else set.add(day);
+                                this._choreDraft = { ...d, custom_days: DAYS_LIST.filter((x) => set.has(x)) };
+                              }}
+                            >${DAYS_SHORT[idx]}</button>
+                          `;
+                        })}
+                      </div>
+                    `
+                  : ""}
+
+                ${d.schedule_type === "weekly"
+                  ? html`
+                      <div class="two-col-grid">
+                        <div class="field-group">
+                          <label class="field-label">Required By Day</label>
+                          <select
+                            class="field-input"
+                            .value=${d.weekly_due_day || ""}
+                            @change=${(ev) => (this._choreDraft = { ...d, weekly_due_day: ev.target.value })}
+                          >
+                            <option value="">Default (${(this._wsData?.cycle?.weekly_due_day || "sat").toUpperCase()})</option>
+                            ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
+                          </select>
+                        </div>
+                        <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
+                          <span class="switch-title">Show All Week</span>
+                          <button
+                            type="button"
+                            class="m3-switch small ${d.weekly_flexible ? "on" : ""}"
+                            @click=${() => (this._choreDraft = { ...d, weekly_flexible: !d.weekly_flexible })}
+                          ><span class="m3-knob"></span></button>
+                        </div>
+                      </div>
+                    `
+                  : ""}
+
+                <div class="two-col-grid">
+                  <div class="field-group">
+                    <label class="field-label">Type</label>
+                    <select
+                      class="field-input"
+                      .value=${d.tier}
+                      @change=${(ev) => (this._choreDraft = { ...d, tier: ev.target.value })}
+                    >
+                      <option value="required">Required (Gates Unlocks)</option>
+                      <option value="bonus">Bonus (Extra Stars)</option>
+                    </select>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Star Points (⭐)</label>
+                    <input
+                      class="field-input"
+                      type="number"
+                      min="0"
+                      max="500"
+                      .value=${String(d.points)}
+                      @input=${(ev) => (this._choreDraft = { ...d, points: Number(ev.target.value) })}
+                    />
+                  </div>
+                </div>
+
+                <div class="field-group">
+                  <label class="field-label">${d.assignment_mode === "up_for_grabs" ? "Eligible Kids (leave empty for anyone)" : "Assigned Kids"}</label>
+                  <div class="kid-selector-pills">
+                    ${kids.map((k) => {
+                      const sel = (d.assigned_kids || []).includes(k.kid_id);
+                      return html`
+                        <button
+                          type="button"
+                          class="kid-pick-pill ${sel ? "active" : ""}"
+                          style="--kid-accent:${k.accent_color};"
+                          @click=${() => {
+                            const set = new Set(d.assigned_kids || []);
+                            if (set.has(k.kid_id)) set.delete(k.kid_id);
+                            else set.add(k.kid_id);
+                            this._choreDraft = { ...d, assigned_kids: Array.from(set) };
+                          }}
+                        >${k.avatar} ${k.name}</button>
+                      `;
+                    })}
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  class="kid-pick-pill ${this._choreFilterKid === k.kid_id ? "active" : ""}"
-                  style="--kid-accent:${k.accent_color};"
-                  @click=${() => (this._choreFilterKid = k.kid_id)}
-                >${k.avatar} ${k.name}</button>
-              `
-            )}
+                  class="inline-link-btn"
+                  style="align-self:flex-start;"
+                  @click=${() => (this._choreMoreOpen = !this._choreMoreOpen)}
+                >
+                  ${this._choreMoreOpen ? "Hide advanced options ▴" : "More options (Approval override, Custom image) ▾"}
+                </button>
+
+                ${this._choreMoreOpen
+                  ? html`
+                      <div class="two-col-grid">
+                        <div class="field-group">
+                          <label class="field-label">Trust / Approval Override</label>
+                          <select
+                            class="field-input"
+                            .value=${d.trust_mode}
+                            @change=${(ev) => (this._choreDraft = { ...d, trust_mode: ev.target.value })}
+                          >
+                            <option value="inherit">Inherit Kid / Global Default</option>
+                            <option value="honor_system">Always Honor System</option>
+                            <option value="parent_approval">Always Parent Approval</option>
+                          </select>
+                        </div>
+                        <div class="field-group">
+                          <label class="field-label">Custom Image URL (Optional)</label>
+                          <input
+                            class="field-input"
+                            type="text"
+                            placeholder="/local/chores/bed.png"
+                            .value=${d.image || ""}
+                            @input=${(ev) => (this._choreDraft = { ...d, image: ev.target.value })}
+                          />
+                        </div>
+                      </div>
+                    `
+                  : ""}
+
+                <button type="button" class="primary-cta-btn" @click=${() => this._saveChore()}>
+                  ${d.chore_id ? "Update Chore" : "Save Chore"}
+                </button>
+              </div>
+            `
+          : ""}
+
+        <div class="passable-section-card">
+          <div class="passable-section-header wrap">
+            <div class="header-left-group">
+              <span class="passable-section-title">Chores (${filtered.length})</span>
+              <select
+                class="compact-select"
+                .value=${this._choreFilterKid}
+                @change=${(ev) => (this._choreFilterKid = ev.target.value)}
+                aria-label="Filter chores by child"
+              >
+                <option value="all">All Kids</option>
+                ${kids.map((k) => html`<option value="${k.kid_id}">${k.avatar} ${k.name}</option>`)}
+              </select>
+            </div>
+            <div class="drawer-actions">
+              <select
+                class="compact-select"
+                @change=${(ev) => {
+                  const scope = ev.target.value;
+                  if (scope) this._resetChores(scope);
+                  ev.target.value = "";
+                }}
+                aria-label="Reset chores"
+              >
+                <option value="">Reset…</option>
+                <option value="daily">Reset Daily</option>
+                <option value="weekly">Reset Weekly</option>
+                <option value="all">Reset All</option>
+              </select>
+              ${!this._choreFormOpen
+                ? html`
+                    <button
+                      type="button"
+                      class="mini-primary-btn"
+                      @click=${() => {
+                        this._choreDraft = {
+                          ...this._emptyChoreDraft(),
+                          assigned_kids: kids.filter((k) => k.enabled).map((k) => k.kid_id),
+                        };
+                        this._choreMoreOpen = false;
+                        this._choreFormOpen = true;
+                      }}
+                    >+ Add</button>
+                  `
+                : ""}
+            </div>
           </div>
 
           ${filtered.length === 0
-            ? html`<div class="muted-hint">No chores match this filter yet.</div>`
+            ? html`<div class="muted-hint">No chores configured yet. Tap "+ Add" to create your first chore.</div>`
             : filtered.map(
                 (c) => html`
                   <div class="drawer-row">
@@ -2197,7 +2378,11 @@ class PassableChoresCard extends LitElement {
                       <button
                         type="button"
                         class="icon-mini-btn"
-                        @click=${() => (this._choreDraft = { ...c, weekly_due_day: c.weekly_due_day || "" })}
+                        @click=${() => {
+                          this._choreDraft = { ...c, weekly_due_day: c.weekly_due_day || "" };
+                          this._choreMoreOpen = Boolean(c.image || (c.trust_mode && c.trust_mode !== "inherit"));
+                          this._choreFormOpen = true;
+                        }}
                         title="Edit"
                       ><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
                       <button
@@ -2220,98 +2405,133 @@ class PassableChoresCard extends LitElement {
     const k = this._kidDraft;
     return html`
       <div class="modal-tab-body">
-        <div class="passable-section-card">
-          <div class="passable-section-header">
-            <span class="passable-section-title">${k.kid_id ? "Edit Child Profile" : "Add Child"}</span>
-            ${k.kid_id
-              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._kidDraft = this._emptyKidDraft())}>+ New</button>`
-              : ""}
-          </div>
-
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Child Name</label>
-              <input
-                class="field-input"
-                type="text"
-                placeholder="e.g. Madeleine"
-                .value=${k.name}
-                @input=${(ev) => (this._kidDraft = { ...k, name: ev.target.value })}
-              />
-            </div>
-            <div class="field-group">
-              <label class="field-label">Avatar Emoji or /local/ Image URL</label>
-              <input
-                class="field-input"
-                type="text"
-                .value=${k.avatar}
-                @input=${(ev) => (this._kidDraft = { ...k, avatar: ev.target.value })}
-              />
-            </div>
-          </div>
-
-          <div class="preset-chips-row">
-            ${KID_AVATAR_PRESETS.map(
-              (av) => html`
-                <button
-                  type="button"
-                  class="emoji-chip ${k.avatar === av ? "active" : ""}"
-                  @click=${() => (this._kidDraft = { ...k, avatar: av })}
-                >${av}</button>
-              `
-            )}
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">Accent Color</label>
-            <div class="color-swatches-row">
-              ${KID_COLOR_PRESETS.map(
-                (col) => html`
+        ${this._kidFormOpen
+          ? html`
+              <div class="passable-section-card editor-card">
+                <div class="passable-section-header">
+                  <span class="passable-section-title">${k.kid_id ? "Edit Child Profile" : "Add Child"}</span>
                   <button
                     type="button"
-                    class="color-swatch ${k.accent_color === col ? "active" : ""}"
-                    style="background:${col};"
-                    @click=${() => (this._kidDraft = { ...k, accent_color: col })}
-                  ></button>
-                `
-              )}
-            </div>
-          </div>
+                    class="inline-link-btn muted"
+                    @click=${() => {
+                      this._kidFormOpen = false;
+                      this._kidCustomAvatar = false;
+                      this._emojiPickerTarget = null;
+                      this._kidDraft = this._emptyKidDraft();
+                    }}
+                  >Cancel</button>
+                </div>
 
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Trust Mode</label>
-              <select
-                class="field-input"
-                .value=${k.trust_mode}
-                @change=${(ev) => (this._kidDraft = { ...k, trust_mode: ev.target.value })}
-              >
-                <option value="inherit">Inherit Global Setting</option>
-                <option value="honor_system">Honor System (Instant)</option>
-                <option value="parent_approval">Require Parent Approval</option>
-              </select>
-            </div>
-            <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
-              <span class="switch-title">Profile Active</span>
-              <button
-                type="button"
-                class="m3-switch small ${k.enabled !== false ? "on" : ""}"
-                @click=${() => (this._kidDraft = { ...k, enabled: !(k.enabled !== false) })}
-              ><span class="m3-knob"></span></button>
-            </div>
-          </div>
+                <div class="icon-name-row">
+                  <div class="field-group">
+                    <label class="field-label">Avatar</label>
+                    ${this._renderEmojiPopoverButton(
+                      "kid",
+                      k.avatar,
+                      KID_AVATAR_PRESETS,
+                      (val) => (this._kidDraft = { ...k, avatar: val }),
+                      true
+                    )}
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Child Name</label>
+                    <input
+                      class="field-input"
+                      type="text"
+                      placeholder="e.g. Madeleine"
+                      .value=${k.name}
+                      @input=${(ev) => (this._kidDraft = { ...k, name: ev.target.value })}
+                    />
+                  </div>
+                </div>
 
-          <button type="button" class="primary-cta-btn" @click=${() => this._saveKid()}>
-            ${k.kid_id ? "Update Child" : "Add Child"}
-          </button>
-        </div>
+                ${this._kidCustomAvatar
+                  ? html`
+                      <div class="field-group">
+                        <label class="field-label">Avatar Image URL (/local/...)</label>
+                        <input
+                          class="field-input"
+                          type="text"
+                          placeholder="/local/avatars/madeleine.jpg"
+                          .value=${k.avatar}
+                          @input=${(ev) => (this._kidDraft = { ...k, avatar: ev.target.value })}
+                        />
+                      </div>
+                    `
+                  : html`
+                      <button
+                        type="button"
+                        class="inline-link-btn"
+                        style="align-self:flex-start;"
+                        @click=${() => (this._kidCustomAvatar = true)}
+                      >Use custom /local/ image URL</button>
+                    `}
+
+                <div class="field-group">
+                  <label class="field-label">Accent Color</label>
+                  <div class="color-swatches-row">
+                    ${KID_COLOR_PRESETS.map(
+                      (col) => html`
+                        <button
+                          type="button"
+                          class="color-swatch ${k.accent_color === col ? "active" : ""}"
+                          style="background:${col};"
+                          @click=${() => (this._kidDraft = { ...k, accent_color: col })}
+                        ></button>
+                      `
+                    )}
+                  </div>
+                </div>
+
+                <div class="two-col-grid">
+                  <div class="field-group">
+                    <label class="field-label">Trust Mode</label>
+                    <select
+                      class="field-input"
+                      .value=${k.trust_mode}
+                      @change=${(ev) => (this._kidDraft = { ...k, trust_mode: ev.target.value })}
+                    >
+                      <option value="inherit">Inherit Global Setting</option>
+                      <option value="honor_system">Honor System (Instant)</option>
+                      <option value="parent_approval">Require Parent Approval</option>
+                    </select>
+                  </div>
+                  <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
+                    <span class="switch-title">Profile Active</span>
+                    <button
+                      type="button"
+                      class="m3-switch small ${k.enabled !== false ? "on" : ""}"
+                      @click=${() => (this._kidDraft = { ...k, enabled: !(k.enabled !== false) })}
+                    ><span class="m3-knob"></span></button>
+                  </div>
+                </div>
+
+                <button type="button" class="primary-cta-btn" @click=${() => this._saveKid()}>
+                  ${k.kid_id ? "Update Child" : "Save Child"}
+                </button>
+              </div>
+            `
+          : ""}
 
         <div class="passable-section-card">
           <div class="passable-section-header">
-            <span class="passable-section-title">Kids (${kids.length})</span>
+            <span class="passable-section-title">Children (${kids.length})</span>
+            ${!this._kidFormOpen
+              ? html`
+                  <button
+                    type="button"
+                    class="mini-primary-btn"
+                    @click=${() => {
+                      this._kidDraft = this._emptyKidDraft();
+                      this._kidCustomAvatar = false;
+                      this._kidFormOpen = true;
+                    }}
+                  >+ Add Child</button>
+                `
+              : ""}
           </div>
           ${kids.length === 0
-            ? html`<div class="muted-hint">Add your kids above to get started.</div>`
+            ? html`<div class="muted-hint">Tap "+ Add Child" to create your kids' profiles.</div>`
             : kids.map(
                 (kid) => html`
                   <div class="drawer-row">
@@ -2328,7 +2548,11 @@ class PassableChoresCard extends LitElement {
                       <button
                         type="button"
                         class="icon-mini-btn"
-                        @click=${() => (this._kidDraft = { ...kid })}
+                        @click=${() => {
+                          this._kidDraft = { ...kid };
+                          this._kidCustomAvatar = Boolean(kid.avatar && (kid.avatar.startsWith("/") || kid.avatar.startsWith("http")));
+                          this._kidFormOpen = true;
+                        }}
                       ><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
                       <button
                         type="button"
@@ -2354,215 +2578,342 @@ class PassableChoresCard extends LitElement {
 
     return html`
       <div class="modal-tab-body">
-        <div class="passable-section-card">
-          <div class="passable-section-header">
-            <span class="passable-section-title">${r.rule_id ? "Edit Device Unlock Rule" : "Add Device Unlock Rule"}</span>
-            ${r.rule_id
-              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._ruleDraft = this._emptyRuleDraft())}>+ New</button>`
-              : ""}
-          </div>
-
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Rule Name</label>
-              <input
-                class="field-input"
-                type="text"
-                placeholder="e.g. Living Room TV"
-                .value=${r.name}
-                @input=${(ev) => (this._ruleDraft = { ...r, name: ev.target.value })}
-              />
-            </div>
-            <div class="field-group">
-              <label class="field-label">Unlock Scope</label>
-              <select
-                class="field-input"
-                .value=${r.scope}
-                @change=${(ev) => (this._ruleDraft = { ...r, scope: ev.target.value })}
-              >
-                <option value="shared">Shared Family Device</option>
-                <option value="personal">Personal Child Device</option>
-              </select>
-            </div>
-          </div>
-
-          ${r.scope === "personal"
-            ? html`
-                <div class="field-group">
-                  <label class="field-label">Child</label>
-                  <select
-                    class="field-input"
-                    .value=${r.kid_id}
-                    @change=${(ev) => (this._ruleDraft = { ...r, kid_id: ev.target.value })}
-                  >
-                    <option value="">Select Child...</option>
-                    ${kids.map((kid) => html`<option value="${kid.kid_id}">${kid.avatar} ${kid.name}</option>`)}
-                  </select>
-                </div>
-              `
-            : html`
-                <div class="field-group">
-                  <label class="field-label">Shared Unlock Condition (0-Chore Kids Ignored)</label>
-                  <select
-                    class="field-input"
-                    .value=${r.shared_mode}
-                    @change=${(ev) => (this._ruleDraft = { ...r, shared_mode: ev.target.value })}
-                  >
-                    <option value="any_active_kid">Any Active Kid Finishes</option>
-                    <option value="all_active_kids">All Active Kids Finish</option>
-                  </select>
-                </div>
-              `}
-
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Target Integration / Mode</label>
-              <select
-                class="field-input"
-                .value=${r.target_mode}
-                @change=${(ev) => (this._ruleDraft = { ...r, target_mode: ev.target.value })}
-              >
-                <option value="passable_screen_time">Passable Screen Time Engine</option>
-                <option value="lockout_switch">Lockout Switch (ON = Locked)</option>
-                <option value="power_switch">Power Switch / TV (OFF = Locked)</option>
-                <option value="nintendo_switch">Nintendo Switch Max Time</option>
-              </select>
-            </div>
-
-            ${r.target_mode === "passable_screen_time"
-              ? html`
-                  <div class="field-group">
-                    <label class="field-label">Screen Time Device</label>
-                    <select
-                      class="field-input"
-                      .value=${r.screen_time_device_id}
-                      @change=${(ev) => (this._ruleDraft = { ...r, screen_time_device_id: ev.target.value })}
-                    >
-                      <option value="">Select Device...</option>
-                      <option value="all">All Screen Time Devices</option>
-                      ${(cands.screen_time_devices || []).map(
-                        (dev) => html`<option value="${dev.device_id}">${dev.name}</option>`
-                      )}
-                    </select>
-                  </div>
-                `
-              : html`
-                  <div class="field-group">
-                    <label class="field-label">Target Entity</label>
-                    <select
-                      class="field-input"
-                      .value=${r.target_entity}
-                      @change=${(ev) => (this._ruleDraft = { ...r, target_entity: ev.target.value })}
-                    >
-                      <option value="">Select Entity...</option>
-                      ${(r.target_mode === "nintendo_switch" ? cands.nintendo_numbers : cands.switches || []).map(
-                        (ent) => html`<option value="${ent.entity_id}">${ent.name} (${ent.entity_id})</option>`
-                      )}
-                    </select>
-                  </div>
-                `}
-          </div>
-
-          <div class="switch-control-row">
-            <span class="switch-sub">Lock on morning reset & respect Screen Time bedtime schedules</span>
-            <button
-              type="button"
-              class="m3-switch small ${r.respect_screen_time_schedules !== false ? "on" : ""}"
-              @click=${() => (this._ruleDraft = { ...r, respect_screen_time_schedules: !(r.respect_screen_time_schedules !== false) })}
-            ><span class="m3-knob"></span></button>
-          </div>
-
-          <button type="button" class="primary-cta-btn" @click=${() => this._saveUnlockRule()}>
-            ${r.rule_id ? "Update Unlock Rule" : "Save Unlock Rule"}
-          </button>
-
-          ${rules.map(
-            (rule) => html`
-              <div class="drawer-row">
-                <div class="drawer-row-left">
-                  <ha-icon icon="${rule.is_currently_locked === false ? "mdi:lock-open-variant" : "mdi:lock"}" style="--mdc-icon-size:18px;color:${rule.is_currently_locked === false ? "#16a34a" : "#d97706"};"></ha-icon>
-                  <div>
-                    <div class="drawer-row-title">${rule.name}</div>
-                    <div class="drawer-row-sub">${rule.scope === "personal" ? `Personal (${rule.kid_id})` : `Shared (${rule.shared_mode})`} · ${rule.screen_time_device_id || rule.target_entity || "Unbound"}</div>
-                  </div>
-                </div>
-                <div class="drawer-actions">
-                  <button type="button" class="icon-mini-btn" @click=${() => (this._ruleDraft = { ...rule, kid_id: rule.kid_id || "", screen_time_device_id: rule.screen_time_device_id || "", target_entity: rule.target_entity || "" })}><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
-                  <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteUnlockRule(rule.rule_id)}><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
-                </div>
-              </div>
-            `
-          )}
+        <div class="segmented-tabs two-up">
+          <button
+            type="button"
+            class="seg-tab ${this._unlocksSubTab === "unlocks" ? "active sky" : ""}"
+            @click=${() => (this._unlocksSubTab = "unlocks")}
+          >Screen Unlocks (${rules.length})</button>
+          <button
+            type="button"
+            class="seg-tab ${this._unlocksSubTab === "rewards" ? "active sky" : ""}"
+            @click=${() => (this._unlocksSubTab = "rewards")}
+          >Rewards Shop (${rewards.length})</button>
         </div>
 
-        <div class="passable-section-card">
-          <div class="passable-section-header">
-            <span class="passable-section-title">${rw.reward_id ? "Edit Reward" : "Add Reward"}</span>
-            ${rw.reward_id
-              ? html`<button type="button" class="inline-link-btn" @click=${() => (this._rewardDraft = this._emptyRewardDraft())}>+ New</button>`
-              : ""}
-          </div>
+        ${this._unlocksSubTab === "unlocks"
+          ? html`
+              ${this._ruleFormOpen
+                ? html`
+                    <div class="passable-section-card editor-card">
+                      <div class="passable-section-header">
+                        <span class="passable-section-title">${r.rule_id ? "Edit Unlock Rule" : "New Device Unlock Rule"}</span>
+                        <button
+                          type="button"
+                          class="inline-link-btn muted"
+                          @click=${() => {
+                            this._ruleFormOpen = false;
+                            this._ruleDraft = this._emptyRuleDraft();
+                          }}
+                        >Cancel</button>
+                      </div>
 
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Reward Name</label>
-              <input class="field-input" type="text" placeholder="e.g. +20m Bonus TV" .value=${rw.name} @input=${(ev) => (this._rewardDraft = { ...rw, name: ev.target.value })} />
-            </div>
-            <div class="field-group">
-              <label class="field-label">Star Cost (⭐)</label>
-              <input class="field-input" type="number" min="1" .value=${String(rw.cost)} @input=${(ev) => (this._rewardDraft = { ...rw, cost: Number(ev.target.value) })} />
-            </div>
-          </div>
+                      <div class="two-col-grid">
+                        <div class="field-group">
+                          <label class="field-label">Rule Name</label>
+                          <input
+                            class="field-input"
+                            type="text"
+                            placeholder="e.g. Living Room TV"
+                            .value=${r.name}
+                            @input=${(ev) => (this._ruleDraft = { ...r, name: ev.target.value })}
+                          />
+                        </div>
+                        <div class="field-group">
+                          <label class="field-label">Unlock Scope</label>
+                          <select
+                            class="field-input"
+                            .value=${r.scope}
+                            @change=${(ev) => (this._ruleDraft = { ...r, scope: ev.target.value })}
+                          >
+                            <option value="shared">Shared Family Device</option>
+                            <option value="personal">Personal Child Device</option>
+                          </select>
+                        </div>
+                      </div>
 
-          <div class="preset-chips-row">
-            ${REWARD_EMOJI_PRESETS.map(
-              (em) => html`<button type="button" class="emoji-chip ${rw.emoji === em ? "active" : ""}" @click=${() => (this._rewardDraft = { ...rw, emoji: em })}>${em}</button>`
-            )}
-          </div>
+                      ${r.scope === "personal"
+                        ? html`
+                            <div class="field-group">
+                              <label class="field-label">Child</label>
+                              <select
+                                class="field-input"
+                                .value=${r.kid_id}
+                                @change=${(ev) => (this._ruleDraft = { ...r, kid_id: ev.target.value })}
+                              >
+                                <option value="">Select Child...</option>
+                                ${kids.map((kid) => html`<option value="${kid.kid_id}">${kid.avatar} ${kid.name}</option>`)}
+                              </select>
+                            </div>
+                          `
+                        : html`
+                            <div class="field-group">
+                              <label class="field-label">Shared Unlock Condition (0-Chore Kids Ignored)</label>
+                              <select
+                                class="field-input"
+                                .value=${r.shared_mode}
+                                @change=${(ev) => (this._ruleDraft = { ...r, shared_mode: ev.target.value })}
+                              >
+                                <option value="any_active_kid">Any Active Kid Finishes</option>
+                                <option value="all_active_kids">All Active Kids Finish</option>
+                              </select>
+                            </div>
+                          `}
 
-          <div class="two-col-grid">
-            <div class="field-group">
-              <label class="field-label">Reward Type</label>
-              <select class="field-input" .value=${rw.reward_type} @change=${(ev) => (this._rewardDraft = { ...rw, reward_type: ev.target.value })}>
-                <option value="parent_fulfilled">Parent-Fulfilled (Push Notification)</option>
-                <option value="smart_action">Smart Home Auto-Reward</option>
-              </select>
-            </div>
-            ${rw.reward_type === "smart_action"
-              ? html`
-                  <div class="field-group">
-                    <label class="field-label">Action Kind</label>
-                    <select class="field-input" .value=${rw.action_kind} @change=${(ev) => (this._rewardDraft = { ...rw, action_kind: ev.target.value })}>
-                      <option value="screen_time_timer">Screen Time Viewing Timer</option>
-                      <option value="screen_time_bonus">Screen Time +Daily Bonus</option>
-                      <option value="nintendo_bonus">Nintendo Switch +Minutes</option>
-                    </select>
-                  </div>
-                `
-              : ""}
-          </div>
+                      <div class="two-col-grid">
+                        <div class="field-group">
+                          <label class="field-label">Target Integration / Mode</label>
+                          <select
+                            class="field-input"
+                            .value=${r.target_mode}
+                            @change=${(ev) => (this._ruleDraft = { ...r, target_mode: ev.target.value })}
+                          >
+                            <option value="passable_screen_time">Passable Screen Time Engine</option>
+                            <option value="lockout_switch">Lockout Switch (ON = Locked)</option>
+                            <option value="power_switch">Power Switch / TV (OFF = Locked)</option>
+                            <option value="nintendo_switch">Nintendo Switch Max Time</option>
+                          </select>
+                        </div>
 
-          <button type="button" class="primary-cta-btn" @click=${() => this._saveReward()}>
-            ${rw.reward_id ? "Update Reward" : "Save Reward"}
-          </button>
+                        ${r.target_mode === "passable_screen_time"
+                          ? html`
+                              <div class="field-group">
+                                <label class="field-label">Screen Time Device</label>
+                                <select
+                                  class="field-input"
+                                  .value=${r.screen_time_device_id}
+                                  @change=${(ev) => (this._ruleDraft = { ...r, screen_time_device_id: ev.target.value })}
+                                >
+                                  <option value="">Select Device...</option>
+                                  <option value="all">All Screen Time Devices</option>
+                                  ${(cands.screen_time_devices || []).map(
+                                    (dev) => html`<option value="${dev.device_id}">${dev.name}</option>`
+                                  )}
+                                </select>
+                              </div>
+                            `
+                          : html`
+                              <div class="field-group">
+                                <label class="field-label">Target Entity</label>
+                                <select
+                                  class="field-input"
+                                  .value=${r.target_entity}
+                                  @change=${(ev) => (this._ruleDraft = { ...r, target_entity: ev.target.value })}
+                                >
+                                  <option value="">Select Entity...</option>
+                                  ${(r.target_mode === "nintendo_switch" ? cands.nintendo_numbers : cands.switches || []).map(
+                                    (ent) => html`<option value="${ent.entity_id}">${ent.name}</option>`
+                                  )}
+                                </select>
+                              </div>
+                            `}
+                      </div>
 
-          ${rewards.map(
-            (item) => html`
-              <div class="drawer-row">
-                <div class="drawer-row-left">
-                  <span class="drawer-emoji">${item.emoji}</span>
-                  <div>
-                    <div class="drawer-row-title">${item.name}</div>
-                    <div class="drawer-row-sub">${item.cost} ⭐ · ${item.reward_type === "smart_action" ? "Auto Smart Action" : "Parent Fulfilled"}</div>
-                  </div>
+                      <div class="switch-control-row">
+                        <span class="switch-sub">Lock on morning reset & respect Screen Time bedtime schedules</span>
+                        <button
+                          type="button"
+                          class="m3-switch small ${r.respect_screen_time_schedules !== false ? "on" : ""}"
+                          @click=${() => (this._ruleDraft = { ...r, respect_screen_time_schedules: !(r.respect_screen_time_schedules !== false) })}
+                        ><span class="m3-knob"></span></button>
+                      </div>
+
+                      <button type="button" class="primary-cta-btn" @click=${() => this._saveUnlockRule()}>
+                        ${r.rule_id ? "Update Unlock Rule" : "Save Unlock Rule"}
+                      </button>
+                    </div>
+                  `
+                : ""}
+
+              <div class="passable-section-card">
+                <div class="passable-section-header">
+                  <span class="passable-section-title">Device Unlock Rules (${rules.length})</span>
+                  ${!this._ruleFormOpen
+                    ? html`
+                        <button
+                          type="button"
+                          class="mini-primary-btn"
+                          @click=${() => {
+                            this._ruleDraft = this._emptyRuleDraft();
+                            this._ruleFormOpen = true;
+                          }}
+                        >+ Add Rule</button>
+                      `
+                    : ""}
                 </div>
-                <div class="drawer-actions">
-                  <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteReward(item.reward_id)}><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
-                </div>
+                ${rules.length === 0
+                  ? html`<div class="muted-hint">Tap "+ Add Rule" to unlock TVs, tablets, or switches when chores are done.</div>`
+                  : rules.map(
+                      (rule) => html`
+                        <div class="drawer-row">
+                          <div class="drawer-row-left">
+                            <ha-icon icon="${rule.is_currently_locked === false ? "mdi:lock-open-variant" : "mdi:lock"}" style="--mdc-icon-size:18px;color:${rule.is_currently_locked === false ? "#16a34a" : "#d97706"};"></ha-icon>
+                            <div>
+                              <div class="drawer-row-title">${rule.name}</div>
+                              <div class="drawer-row-sub">${rule.scope === "personal" ? `Personal (${rule.kid_id})` : `Shared (${rule.shared_mode})`} · ${rule.screen_time_device_id || rule.target_entity || "Unbound"}</div>
+                            </div>
+                          </div>
+                          <div class="drawer-actions">
+                            <button
+                              type="button"
+                              class="icon-mini-btn"
+                              @click=${() => {
+                                this._ruleDraft = { ...rule, kid_id: rule.kid_id || "", screen_time_device_id: rule.screen_time_device_id || "", target_entity: rule.target_entity || "" };
+                                this._ruleFormOpen = true;
+                              }}
+                            ><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                            <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteUnlockRule(rule.rule_id)}><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                          </div>
+                        </div>
+                      `
+                    )}
               </div>
             `
-          )}
-        </div>
+          : html`
+              ${this._rewardFormOpen
+                ? html`
+                    <div class="passable-section-card editor-card">
+                      <div class="passable-section-header">
+                        <span class="passable-section-title">${rw.reward_id ? "Edit Reward" : "New Reward"}</span>
+                        <button
+                          type="button"
+                          class="inline-link-btn muted"
+                          @click=${() => {
+                            this._rewardFormOpen = false;
+                            this._emojiPickerTarget = null;
+                            this._rewardDraft = this._emptyRewardDraft();
+                          }}
+                        >Cancel</button>
+                      </div>
+
+                      <div class="icon-name-row">
+                        <div class="field-group">
+                          <label class="field-label">Icon</label>
+                          ${this._renderEmojiPopoverButton(
+                            "reward",
+                            rw.emoji,
+                            REWARD_EMOJI_PRESETS,
+                            (val) => (this._rewardDraft = { ...rw, emoji: val })
+                          )}
+                        </div>
+                        <div class="field-group">
+                          <label class="field-label">Reward Name</label>
+                          <input class="field-input" type="text" placeholder="e.g. +20m Bonus TV" .value=${rw.name} @input=${(ev) => (this._rewardDraft = { ...rw, name: ev.target.value })} />
+                        </div>
+                      </div>
+
+                      <div class="two-col-grid">
+                        <div class="field-group">
+                          <label class="field-label">Star Cost (⭐)</label>
+                          <input class="field-input" type="number" min="1" .value=${String(rw.cost)} @input=${(ev) => (this._rewardDraft = { ...rw, cost: Number(ev.target.value) })} />
+                        </div>
+                        <div class="field-group">
+                          <label class="field-label">Reward Type</label>
+                          <select class="field-input" .value=${rw.reward_type} @change=${(ev) => (this._rewardDraft = { ...rw, reward_type: ev.target.value })}>
+                            <option value="parent_fulfilled">Parent-Fulfilled (Push Alert)</option>
+                            <option value="smart_action">Smart Home Auto-Reward</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      ${rw.reward_type === "smart_action"
+                        ? html`
+                            <div class="two-col-grid">
+                              <div class="field-group">
+                                <label class="field-label">Smart Action</label>
+                                <select class="field-input" .value=${rw.action_kind} @change=${(ev) => (this._rewardDraft = { ...rw, action_kind: ev.target.value })}>
+                                  <option value="screen_time_timer">Screen Time Viewing Timer</option>
+                                  <option value="screen_time_bonus">Screen Time +Daily Bonus</option>
+                                  <option value="nintendo_bonus">Nintendo Switch +Minutes</option>
+                                </select>
+                              </div>
+                              <div class="field-group">
+                                <label class="field-label">Duration (Minutes)</label>
+                                <input class="field-input" type="number" min="5" max="240" .value=${String(rw.duration_minutes || 20)} @input=${(ev) => (this._rewardDraft = { ...rw, duration_minutes: Number(ev.target.value) })} />
+                              </div>
+                            </div>
+                            ${rw.action_kind === "nintendo_bonus"
+                              ? html`
+                                  <div class="field-group">
+                                    <label class="field-label">Nintendo Switch Limit Entity</label>
+                                    <select class="field-input" .value=${rw.entity_id || ""} @change=${(ev) => (this._rewardDraft = { ...rw, entity_id: ev.target.value })}>
+                                      <option value="">Select Entity...</option>
+                                      ${(cands.nintendo_numbers || []).map((ent) => html`<option value="${ent.entity_id}">${ent.name}</option>`)}
+                                    </select>
+                                  </div>
+                                `
+                              : html`
+                                  <div class="field-group">
+                                    <label class="field-label">Target Screen Time Device</label>
+                                    <select class="field-input" .value=${rw.device_id || "all"} @change=${(ev) => (this._rewardDraft = { ...rw, device_id: ev.target.value })}>
+                                      <option value="all">All Screen Time Devices</option>
+                                      ${(cands.screen_time_devices || []).map((dev) => html`<option value="${dev.device_id}">${dev.name}</option>`)}
+                                    </select>
+                                  </div>
+                                `}
+                          `
+                        : ""}
+
+                      <button type="button" class="primary-cta-btn" @click=${() => this._saveReward()}>
+                        ${rw.reward_id ? "Update Reward" : "Save Reward"}
+                      </button>
+                    </div>
+                  `
+                : ""}
+
+              <div class="passable-section-card">
+                <div class="passable-section-header">
+                  <span class="passable-section-title">Rewards Shop (${rewards.length})</span>
+                  ${!this._rewardFormOpen
+                    ? html`
+                        <button
+                          type="button"
+                          class="mini-primary-btn"
+                          @click=${() => {
+                            this._rewardDraft = this._emptyRewardDraft();
+                            this._rewardFormOpen = true;
+                          }}
+                        >+ Add Reward</button>
+                      `
+                    : ""}
+                </div>
+                ${rewards.length === 0
+                  ? html`<div class="muted-hint">Tap "+ Add Reward" to offer extra TV time or family treats for stars.</div>`
+                  : rewards.map(
+                      (item) => html`
+                        <div class="drawer-row">
+                          <div class="drawer-row-left">
+                            <span class="drawer-emoji">${item.emoji}</span>
+                            <div>
+                              <div class="drawer-row-title">${item.name}</div>
+                              <div class="drawer-row-sub">${item.cost} ⭐ · ${item.reward_type === "smart_action" ? "Auto Smart Action" : "Parent Fulfilled"}</div>
+                            </div>
+                          </div>
+                          <div class="drawer-actions">
+                            <button
+                              type="button"
+                              class="icon-mini-btn"
+                              @click=${() => {
+                                const sa = item.smart_action || {};
+                                this._rewardDraft = {
+                                  ...this._emptyRewardDraft(),
+                                  ...item,
+                                  action_kind: sa.action_kind || "screen_time_timer",
+                                  device_id: sa.device_id || "all",
+                                  entity_id: sa.entity_id || "",
+                                  duration_minutes: sa.duration_minutes || 20,
+                                };
+                                this._rewardFormOpen = true;
+                              }}
+                              title="Edit"
+                            ><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                            <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteReward(item.reward_id)} title="Delete"><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                          </div>
+                        </div>
+                      `
+                    )}
+              </div>
+            `}
       </div>
     `;
   }
@@ -2612,7 +2963,7 @@ class PassableChoresCard extends LitElement {
 
                 <div class="two-col-grid">
                   <div class="field-group">
-                    <label class="field-label">Daily Reset Time (HH:MM)</label>
+                    <label class="field-label">Daily Reset Time</label>
                     <input
                       class="field-input"
                       type="time"
@@ -2629,6 +2980,29 @@ class PassableChoresCard extends LitElement {
                     >
                       <option value="honor_system">Honor System (Instant)</option>
                       <option value="parent_approval">Parent Approval Required</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="two-col-grid">
+                  <div class="field-group">
+                    <label class="field-label">Weekly Rollover Day</label>
+                    <select
+                      class="field-input"
+                      .value=${settings.weekly_reset_day || "mon"}
+                      @change=${(ev) => this._saveSettingsPatch({ weekly_reset_day: ev.target.value })}
+                    >
+                      ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
+                    </select>
+                  </div>
+                  <div class="field-group">
+                    <label class="field-label">Weekly Required-By Day</label>
+                    <select
+                      class="field-input"
+                      .value=${settings.weekly_due_day || "sat"}
+                      @change=${(ev) => this._saveSettingsPatch({ weekly_due_day: ev.target.value })}
+                    >
+                      ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
                     </select>
                   </div>
                 </div>
@@ -2659,51 +3033,45 @@ class PassableChoresCard extends LitElement {
 
                 ${(cands.calendars || []).length > 0
                   ? html`
-                      <div class="field-group">
-                        <label class="field-label">No-School / Holiday Calendars</label>
-                        <div class="kid-selector-pills">
-                          ${(cands.calendars || []).map((cal) => {
-                            const selected = (settings.no_school_calendars || []).includes(cal.entity_id);
-                            return html`
-                              <button
-                                type="button"
-                                class="kid-pick-pill ${selected ? "active" : ""}"
-                                @click=${() => {
-                                  const next = new Set(settings.no_school_calendars || []);
-                                  if (next.has(cal.entity_id)) next.delete(cal.entity_id);
-                                  else next.add(cal.entity_id);
-                                  this._saveSettingsPatch({ no_school_calendars: Array.from(next) });
-                                }}
-                              >${cal.name}</button>
-                            `;
-                          })}
-                        </div>
-                      </div>
+                      <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{
+                          select: {
+                            multiple: true,
+                            mode: "dropdown",
+                            options: (cands.calendars || []).map((cal) => ({
+                              value: cal.entity_id,
+                              label: cal.name,
+                            })),
+                          },
+                        }}
+                        .value=${settings.no_school_calendars || []}
+                        .label=${"No-School / Holiday Calendars"}
+                        @value-changed=${(ev) =>
+                          this._saveSettingsPatch({ no_school_calendars: ev.detail.value || [] })}
+                      ></ha-selector>
                     `
                   : ""}
 
                 ${(cands.notify_services || []).length > 0
                   ? html`
-                      <div class="field-group">
-                        <label class="field-label">Parent Push Notification Targets</label>
-                        <div class="kid-selector-pills">
-                          ${(cands.notify_services || []).map((svc) => {
-                            const selected = (settings.parent_notify_services || []).includes(svc);
-                            return html`
-                              <button
-                                type="button"
-                                class="kid-pick-pill ${selected ? "active" : ""}"
-                                @click=${() => {
-                                  const next = new Set(settings.parent_notify_services || []);
-                                  if (next.has(svc)) next.delete(svc);
-                                  else next.add(svc);
-                                  this._saveSettingsPatch({ parent_notify_services: Array.from(next) });
-                                }}
-                              >${svc.replace("notify.", "")}</button>
-                            `;
-                          })}
-                        </div>
-                      </div>
+                      <ha-selector
+                        .hass=${this.hass}
+                        .selector=${{
+                          select: {
+                            multiple: true,
+                            mode: "dropdown",
+                            options: (cands.notify_services || []).map((svc) => ({
+                              value: svc,
+                              label: svc.replace("notify.", ""),
+                            })),
+                          },
+                        }}
+                        .value=${settings.parent_notify_services || []}
+                        .label=${"Parent Push Notification Targets"}
+                        @value-changed=${(ev) =>
+                          this._saveSettingsPatch({ parent_notify_services: ev.detail.value || [] })}
+                      ></ha-selector>
                     `
                   : ""}
               </div>
@@ -2860,7 +3228,7 @@ class PassableChoresCard extends LitElement {
                     ? html`
                         <div class="drawer-empty">
                           No active chores configured for today.
-                          ${!c.hide_admin_setup
+                          ${this._canViewAdminControls()
                             ? html`<button type="button" class="inline-link-btn" @click=${() => this._openModal("kids")}>Setup Kids & Chores →</button>`
                             : ""}
                         </div>
@@ -3058,6 +3426,11 @@ class PassableChoresCard extends LitElement {
         color: var(--secondary-text-color); background: rgba(128, 128, 128, 0.1);
       }
       .chore-check-circle.completed { background: #22c55e; color: #ffffff; }
+      .chore-check-circle.waiting { background: rgba(245, 158, 11, 0.18); color: #d97706; }
+      .kid-empty-board {
+        padding: 12px 8px; text-align: center; font-size: 12px; color: var(--secondary-text-color);
+        border: 1px dashed var(--divider-color, rgba(128, 128, 128, 0.22)); border-radius: 10px;
+      }
       .inline-approve-pair { display: flex; gap: 4px; }
       .mini-approve-btn {
         width: 28px; height: 28px; border-radius: 8px; border: none; font-weight: 800; cursor: pointer;
@@ -3238,17 +3611,45 @@ class PassableChoresCard extends LitElement {
         border-radius: 16px; padding: 11px 12px; display: flex; flex-direction: column; gap: 9px;
       }
       .passable-section-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      .passable-section-header.wrap { flex-wrap: wrap; }
+      .header-left-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .passable-section-title { font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+      .editor-card { border-color: rgba(2, 132, 199, 0.35); background: rgba(2, 132, 199, 0.05); }
       .muted-hint { margin: 0; font-size: 12px; color: var(--secondary-text-color); }
       .two-col-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-      .field-group { display: flex; flex-direction: column; gap: 4px; }
+      .icon-name-row { display: grid; grid-template-columns: 62px 1fr; gap: 8px; align-items: end; }
+      .field-group { display: flex; flex-direction: column; gap: 4px; position: relative; }
       .field-label { font-size: 11.5px; font-weight: 700; color: var(--secondary-text-color); }
-      .field-input {
+      .field-input, .compact-select {
         width: 100%; box-sizing: border-box; padding: 7px 10px; border-radius: 9px;
         border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.28));
         background: var(--card-background-color, rgba(128, 128, 128, 0.06));
         color: var(--primary-text-color); font-family: inherit; font-size: 13px;
       }
+      .compact-select { width: auto; padding: 4px 8px; font-size: 12px; font-weight: 600; border-radius: 8px; }
+      .mini-primary-btn {
+        padding: 5px 11px; border-radius: 999px; border: none; background: var(--primary-color, #0284c7);
+        color: #ffffff; font-family: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+      }
+      .inline-link-btn.muted { color: var(--secondary-text-color); }
+      .emoji-picker-wrap { position: relative; }
+      .emoji-trigger-btn {
+        width: 100%; height: 34px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.28));
+        background: var(--card-background-color, rgba(128, 128, 128, 0.06));
+        color: var(--primary-text-color); font-size: 18px; cursor: pointer; padding: 0 6px;
+      }
+      .emoji-trigger-btn.open { border-color: var(--primary-color, #0284c7); }
+      .emoji-trigger-caret { font-size: 10px; color: var(--secondary-text-color); }
+      .emoji-popover {
+        position: absolute; top: 38px; left: 0; z-index: 30; width: 224px; padding: 8px; border-radius: 12px;
+        background: var(--ha-card-background, var(--card-background-color, #1e293b));
+        border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.3));
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32); display: flex; flex-direction: column; gap: 8px;
+      }
+      .emoji-popover-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+      .emoji-popover-custom input { font-size: 12px; padding: 5px 8px; }
+      ha-selector { display: block; width: 100%; }
       .preset-chips-row { display: flex; flex-wrap: wrap; gap: 5px; }
       .preset-chip, .emoji-chip, .tiny-preset-btn {
         padding: 4px 9px; border-radius: 999px; border: 1px solid var(--divider-color, rgba(128, 128, 128, 0.25));
@@ -3317,7 +3718,55 @@ class PassableChoresCardEditor extends LitElement {
     return {
       hass: { attribute: false },
       config: { state: true },
+      _users: { state: true },
     };
+  }
+
+  constructor() {
+    super();
+    this._users = [];
+    this._usersLoaded = false;
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._fetchUsers();
+  }
+
+  updated(changedProps) {
+    super.updated && super.updated(changedProps);
+    if (changedProps.has("hass") && this.hass && !this._usersLoaded) {
+      this._fetchUsers();
+    }
+  }
+
+  async _fetchUsers() {
+    if (!this.hass || this._usersLoaded) return;
+    this._usersLoaded = true;
+    try {
+      const users = await this.hass.connection.sendMessagePromise({
+        type: "config/auth/list",
+      });
+      if (Array.isArray(users)) {
+        this._users = users
+          .filter((u) => !u.system_generated && u.is_active !== false)
+          .map((u) => ({
+            id: u.id,
+            name: u.name || u.id,
+            is_admin: Boolean(u.is_admin),
+          }));
+      }
+    } catch (_err) {
+      if (this.hass.user?.id) {
+        this._users = [
+          {
+            id: this.hass.user.id,
+            name: this.hass.user.name || "Current User",
+            is_admin: Boolean(this.hass.user.is_admin),
+          },
+        ];
+      }
+    }
   }
 
   setConfig(config) {
@@ -3336,9 +3785,26 @@ class PassableChoresCardEditor extends LitElement {
     );
   }
 
+  _toggleAdminUser(userId, enabled) {
+    const current = new Set(Array.isArray(this.config?.admin_users) ? this.config.admin_users : []);
+    if (enabled) current.add(userId);
+    else current.delete(userId);
+    this._updateConfig({ admin_users: Array.from(current) });
+  }
+
   render() {
     if (!this.hass || !this.config) return html``;
     const c = this.config;
+    const adminVis =
+      ["everyone", "admins_only", "selected_users", "hidden"].includes(c.admin_visibility)
+        ? c.admin_visibility
+        : c.hide_admin_setup
+          ? "hidden"
+          : Array.isArray(c.admin_users) && c.admin_users.length > 0
+            ? "selected_users"
+            : "everyone";
+    const selectedUsers = Array.isArray(c.admin_users) ? c.admin_users : [];
+
     return html`
       <div class="editor-container">
         <div class="section-box">
@@ -3415,10 +3881,48 @@ class PassableChoresCardEditor extends LitElement {
               <option value="false">Bypass on This Card (Trusted Parent View)</option>
             </select>
           </div>
-          <div class="switch-row">
-            <label class="form-label">Hide Admin Setup Controls (Kiosk)</label>
-            <ha-switch .checked=${c.hide_admin_setup === true} @change=${(ev) => this._updateConfig({ hide_admin_setup: ev.target.checked })}></ha-switch>
+
+          <div class="form-group">
+            <label class="form-label">Admin Setup Controls Visibility</label>
+            <select
+              class="custom-select"
+              .value=${adminVis}
+              @change=${(ev) => {
+                const val = ev.target.value;
+                this._updateConfig({ admin_visibility: val, hide_admin_setup: val === "hidden" });
+              }}
+            >
+              <option value="everyone">Everyone</option>
+              <option value="admins_only">Home Assistant Admins Only</option>
+              <option value="selected_users">Selected Users Only</option>
+              <option value="hidden">Hidden (Always Kiosk)</option>
+            </select>
           </div>
+
+          ${adminVis === "selected_users"
+            ? html`
+                <div class="users-checklist">
+                  <div class="users-help">Select users who can view Command Center & admin controls (like HA's Visibility → User tab):</div>
+                  ${this._users.length === 0
+                    ? html`<div class="users-help">No active users loaded.</div>`
+                    : this._users.map(
+                        (u) => html`
+                          <div class="user-check-row">
+                            <div class="user-check-info">
+                              <ha-icon icon="mdi:account-circle-outline" style="--mdc-icon-size:18px;"></ha-icon>
+                              <span>${u.name}</span>
+                              ${u.is_admin ? html`<span class="user-role-tag">Admin</span>` : ""}
+                            </div>
+                            <ha-switch
+                              .checked=${selectedUsers.includes(u.id) || selectedUsers.includes(u.name)}
+                              @change=${(ev) => this._toggleAdminUser(u.id, ev.target.checked)}
+                            ></ha-switch>
+                          </div>
+                        `
+                      )}
+                </div>
+              `
+            : ""}
         </div>
       </div>
     `;
@@ -3433,6 +3937,11 @@ class PassableChoresCardEditor extends LitElement {
       .form-group { display: flex; flex-direction: column; gap: 4px; }
       .form-label { font-size: 13px; color: var(--primary-text-color); }
       .custom-select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color, #fff); color: var(--primary-text-color); font-family: inherit; }
+      .users-checklist { border-top: 1px solid var(--divider-color, #e0e0e0); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+      .users-help { font-size: 12px; color: var(--secondary-text-color); }
+      .user-check-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 2px; }
+      .user-check-info { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+      .user-role-tag { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: rgba(2, 132, 199, 0.14); color: #0284c7; }
     `;
   }
 }

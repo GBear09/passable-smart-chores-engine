@@ -115,7 +115,9 @@ show_summary_strip: true
 show_footer_strip: true
 hide_inactive_kids: true
 require_pin: auto       # 'auto', true, or false
-hide_admin_setup: false
+admin_visibility: everyone  # 'everyone', 'admins_only', 'selected_users', or 'hidden'
+# admin_users:          # Required when admin_visibility is 'selected_users'
+#   - <ha_user_id>
 ```
 
 ### Wall Panel Placement Example (Below Family Calendar)
@@ -146,7 +148,8 @@ cards:
 | `hide_inactive_kids` | `true` | Automatically hide disabled kids or kids with `0` active chores today. |
 | `kids_filter` | `[]` | Optional list of `kid_id`s to show only specific kids (great for bedroom tablets). |
 | `require_pin` | `"auto"` | `"auto"` uses integration PIN rules (bypassing HA admins), `true` always enforces PIN, `false` bypasses. |
-| `hide_admin_setup` | `false` | Hide the Command Center gear/link on kiosk views. |
+| `admin_visibility` | `"everyone"` | `"everyone"`, `"admins_only"`, `"selected_users"`, or `"hidden"` (replaces legacy `hide_admin_setup`). |
+| `admin_users` | `[]` | List of Home Assistant user IDs/names allowed to see Command Center & admin controls when `admin_visibility: selected_users`. |
 
 ---
 

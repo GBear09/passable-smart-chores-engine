@@ -2,6 +2,25 @@
 
 All notable changes to **Passable Smart Chores Engine** will be documented in this file.
 
+## [1.0.1] - 2026-11-25
+
+### ✨ Improved (Streamlined Command Center & User-Based Admin Visibility)
+- **List-First Collapsible Command Center Forms**:
+  - **Chores**, **Kids & Trust**, **Screen Unlocks**, and **Rewards Shop** now open directly to clean lists of your configured items with `+ Add` and `✏️ Edit` buttons that auto-collapse on save/cancel.
+  - Added a 2-way segmented toggle inside **Unlocks & Rewards** (`Screen Unlocks` | `Rewards Shop`) and full **Edit Reward** support (including Smart Action target configuration).
+  - Moved less-used chore options (Trust override, Custom Image URL) under a collapsible **More options** toggle.
+- **Dropdown & Native Multi-Select Controls (Fewer Pill Clouds)**:
+  - Replaced starter chore template pills with a **`Quick-fill from a starter template…`** dropdown.
+  - Replaced inline emoji/avatar pill walls with compact **icon picker popovers** (`[🧹 ▾]` / `[👧 ▾]`) next to the name field.
+  - Replaced kid filter and reset button rows with compact dropdown selectors (`All Kids`, `Reset…`), and upgraded **No-School / Holiday Calendars** and **Parent Push Notification Targets** to native Home Assistant multi-select `<ha-selector>` dropdowns.
+  - Added **Weekly Rollover Day** and **Weekly Required-By Day** selectors directly inside **Settings & PIN**.
+- **User-Based Admin Controls Visibility**:
+  - Replaced the single kiosk toggle with **Admin Setup Controls Visibility** (`everyone`, `admins_only`, `selected_users`, `hidden`) plus a Home Assistant user checklist (`admin_users` populated via `config/auth/list`, matching HA's native **Visibility → User** tab while remaining backwards-compatible with `hide_admin_setup`).
+  - Also gates inline chore approval buttons (`⏳ Approve`, `✓` / `↺`) behind admin visibility or Parental PIN protection.
+
+### 🐛 Fixed
+- **Paused Child Profiles**: Children with `Profile Active = Off` (`enabled: false`) now stay hidden even when `hide_inactive_kids: false` is set, and enabled kids with `0` chores display a clean `"No chores scheduled today"` placeholder in Board mode.
+
 ## [1.0.0] - 2026-11-24
 
 ### ✨ Added (Initial Release)
