@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "passable_smart_chores_engine"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 STORAGE_KEY = "passable_smart_chores_engine"
 STORAGE_VERSION = 1
 

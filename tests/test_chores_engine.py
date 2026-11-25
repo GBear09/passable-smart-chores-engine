@@ -373,6 +373,90 @@ class TestChoresEngine(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved["status"], REDEMPTION_DENIED)
         self.assertEqual(self.storage.data["kids"]["madeleine"]["points"], 60)
 
+    async def test_new_unlock_rule_locks_immediately_without_fighting_manual_override(self) -> None:
+        self.storage.data["chores"] = {
+            "make_bed": normalize_chore(
+                "make_bed",
+                {
+                    "name": "Make Bed",
+                    "schedule_type": SCHEDULE_DAILY,
+                    "assigned_kids": ["madeleine"],
+                },
+            ),
+        }
+        tue = datetime(2026, 11, 24, 10, 0, tzinfo=timezone.utc)
+
+        with mock.patch(
+            "custom_components.passable_smart_chores_engine.engine.dt_util.now",
+            return_value=tue,
+        ):
+            # Saving a new personal rule mid-day when Madeleine has 0/1 done locks once immediately
+            saved = await self.engine.async_save_unlock_rule(
+                {
+                    "name": "Madeleine Tablet",
+                    "scope": UNLOCK_SCOPE_PERSONAL,
+                    "kid_id": "madeleine",
+                    "target_mode": TARGET_MODE_SCREEN_TIME,
+                    "screen_time_device_id": "madeleine_s_tablet_pause_wireless",
+                }
+            )
+            self.assertTrue(saved["last_applied_locked"])
+            self.hass.services.async_call.assert_any_call(
+                "passable_smart_screen_time_engine",
+                "set_lockout",
+                {
+                    "device_id": "madeleine_s_tablet_pause_wireless",
+                    "locked": True,
+                    "power_on": False,
+                    "rest_of_day": False,
+                },
+                blocking=False,
+            )
+
+            # Subsequent periodic evaluations must NOT re-lock over a parent's manual unlock
+            self.hass.services.async_call.reset_mock()
+            await self.engine.async_evaluate_unlock_rules(now_local=tue)
+            self.hass.services.async_call.assert_not_called()
+
+            # Completing Madeleine's chore unlocks the tablet immediately
+            await self.engine.async_complete_chore("make_bed", "madeleine", now_local=tue)
+            self.hass.services.async_call.assert_any_call(
+                "passable_smart_screen_time_engine",
+                "set_lockout",
+                {
+                    "device_id": "madeleine_s_tablet_pause_wireless",
+                    "locked": False,
+                    "power_on": False,
+                    "rest_of_day": False,
+                },
+                blocking=False,
+            )
+
+            # Editing the rule to point at a different device resets latch & evaluates immediately
+            self.hass.services.async_call.reset_mock()
+            edited = await self.engine.async_save_unlock_rule(
+                {
+                    "rule_id": saved["rule_id"],
+                    "name": "Living Room TV",
+                    "scope": UNLOCK_SCOPE_PERSONAL,
+                    "kid_id": "madeleine",
+                    "target_mode": TARGET_MODE_SCREEN_TIME,
+                    "screen_time_device_id": "living_room_tv_2",
+                }
+            )
+            self.assertEqual(edited["last_applied_locked"], False)
+            self.hass.services.async_call.assert_any_call(
+                "passable_smart_screen_time_engine",
+                "set_lockout",
+                {
+                    "device_id": "living_room_tv_2",
+                    "locked": False,
+                    "power_on": False,
+                    "rest_of_day": False,
+                },
+                blocking=False,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

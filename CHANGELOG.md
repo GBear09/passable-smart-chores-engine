@@ -2,6 +2,18 @@
 
 All notable changes to **Passable Smart Chores Engine** will be documented in this file.
 
+## [1.0.2] - 2026-11-25
+
+### 🐛 Fixed
+- **Unlock Rule Edit Dropdowns Opening Blank**: Fixed Lit `<select>` initial selection timing across all Command Center and Card Editor forms (including **Child**, **Screen Time Device**, **Target Entity**, and **Weekly Due Day**) by binding `?selected` directly on `<option>` elements so saved selections load reliably when editing an existing rule or chore.
+- **Immediate Mid-Day Evaluation for New / Edited Unlock Rules**: Newly created or rebound unlock rules now evaluate and apply their initial lock/unlock state immediately on save (without overriding manual parent unlocks on later 60s ticks), and dispatch `SIGNAL_STORAGE_UPDATED` so WebSocket listeners stay synchronized.
+- **Unlock Rule List & Validation**: Added validation toasts before saving incomplete rules, resolved friendly kid/device names on rule rows, highlighted incomplete rules needing attention, and exposed live `is_satisfied` + `status_reason` in WebSocket snapshots.
+
+### ✨ Added
+- **Command Center Quick Guides & Contextual Field Help**:
+  - Added compact, collapsible **How It Works** setup guides at the top of **Kids & Trust**, **Chores**, **Screen Unlocks**, **Rewards Shop**, and **Settings & PIN** (auto-expanded while a section is empty, collapsed cleanly once configured).
+  - Added dynamic inline descriptions directly below **Unlock Scope** and **Target Integration / Mode** explaining what **Passable Screen Time Engine**, **Lockout Switch**, **Power Switch / TV**, and **Nintendo Switch Max Time** do, plus a **Unlocked Daily Limit (Minutes)** input for Nintendo Switch rules.
+
 ## [1.0.1] - 2026-11-25
 
 ### ✨ Improved (Streamlined Command Center & User-Based Admin Visibility)

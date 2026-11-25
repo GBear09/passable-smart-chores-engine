@@ -1591,6 +1591,10 @@ class PassableChoresEngine:
                     should_lock = (
                         (is_cycle_reset and rule.get("lock_on_reset", True))
                         or (
+                            rule.get("last_applied_locked") is None
+                            and rule.get("lock_on_reset", True)
+                        )
+                        or (
                             rule.get("unlocked_for_cycle_date") == cycle_date_str
                             and rule.get("re_lock_if_uncompleted", True)
                         )
@@ -1788,9 +1792,21 @@ class PassableChoresEngine:
         existing = rules.get(rule_id, {})
         merged = {**existing, **payload, "rule_id": rule_id}
         rule = normalize_unlock_rule(rule_id, merged)
+        binding_keys = (
+            "scope",
+            "kid_id",
+            "shared_mode",
+            "target_mode",
+            "screen_time_device_id",
+            "target_entity",
+        )
+        if is_new or any(existing.get(k) != rule.get(k) for k in binding_keys):
+            rule["last_applied_locked"] = None
+            rule["unlocked_for_cycle_date"] = None
         rules[rule_id] = rule
         await self.storage.async_save()
         await self.async_evaluate_unlock_rules()
+        async_dispatcher_send(self.hass, SIGNAL_STORAGE_UPDATED)
         async_dispatcher_send(self.hass, SIGNAL_ENGINE_UPDATED)
         return rule
 
@@ -1799,6 +1815,7 @@ class PassableChoresEngine:
         if rule_id in rules:
             del rules[rule_id]
             await self.storage.async_save()
+            async_dispatcher_send(self.hass, SIGNAL_STORAGE_UPDATED)
             async_dispatcher_send(self.hass, SIGNAL_ENGINE_UPDATED)
 
     async def async_save_settings(self, updates: dict[str, Any]) -> dict[str, Any]:

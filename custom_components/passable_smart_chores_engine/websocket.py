@@ -22,7 +22,7 @@ from .const import (
     TARGET_MODE_SCREEN_TIME,
     VERSION,
 )
-from .engine import PassableChoresEngine
+from .engine import PassableChoresEngine, evaluate_unlock_rule_satisfied
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -144,10 +144,15 @@ def _resolve_rule_live_locked(hass: HomeAssistant, rule: dict[str, Any]) -> bool
             if k in ("frontend_registered", "websocket_registered"):
                 continue
             storage = getattr(st_engine, "storage", None)
-            if storage and hasattr(storage, "get_device"):
-                dev = storage.get_device(dev_id)
-                if dev:
-                    return bool(dev.get("locked", False))
+            if storage:
+                if dev_id == "all" and hasattr(storage, "get_all_devices"):
+                    devs = list((storage.get_all_devices() or {}).values())
+                    if devs:
+                        return all(bool(d.get("locked", False)) for d in devs)
+                elif hasattr(storage, "get_device"):
+                    dev = storage.get_device(dev_id)
+                    if dev:
+                        return bool(dev.get("locked", False))
         return rule.get("last_applied_locked")
     target = rule.get("target_entity")
     if not target:
@@ -183,7 +188,10 @@ def build_engine_snapshot(
     unlock_rules = []
     for rule in engine.storage.get_unlock_rules().values():
         rcopy = dict(rule)
+        sat, reason = evaluate_unlock_rule_satisfied(rule, eval_data["kids"])
         rcopy["is_currently_locked"] = _resolve_rule_live_locked(hass, rule)
+        rcopy["is_satisfied"] = sat
+        rcopy["status_reason"] = reason
         unlock_rules.append(rcopy)
 
     return {

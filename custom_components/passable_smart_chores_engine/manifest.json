@@ -7,5 +7,5 @@
   "issue_tracker": "https://github.com/GBear09/passable-smart-chores-engine/issues",
   "iot_class": "local_push",
   "dependencies": ["http"],
-  "version": "1.0.1"
+  "version": "1.0.2"
 }

@@ -3,10 +3,10 @@
  * Bundled companion card for Passable Smart Chores Engine
  * https://github.com/GBear09/passable-smart-chores-engine
  *
- * Version 1.0.1 - Streamlined Command Center, Dropdowns & User-Based Admin Visibility
+ * Version 1.0.2 - Unlock Rule Edit Fix, Immediate Rule Eval & Command Center Guides
  */
 
-const CARD_VERSION = "1.0.1";
+const CARD_VERSION = "1.0.2";
 const ENGINE_DOMAIN = "passable_smart_chores_engine";
 
 const LitElement = Object.getPrototypeOf(
@@ -134,6 +134,7 @@ class PassableChoresCard extends LitElement {
       _editingRewardId: { state: true },
       _rewardDraft: { state: true },
       _emojiPickerTarget: { state: true },
+      _guideOpen: { state: true },
       _setupSubTab: { state: true },
       _secCurrentPin: { state: true },
       _secNewPin: { state: true },
@@ -179,6 +180,7 @@ class PassableChoresCard extends LitElement {
     this._editingRewardId = null;
     this._rewardDraft = this._emptyRewardDraft();
     this._emojiPickerTarget = null;
+    this._guideOpen = {};
     this._setupSubTab = "settings";
 
     this._secCurrentPin = "";
@@ -889,13 +891,25 @@ class PassableChoresCard extends LitElement {
   }
 
   _saveUnlockRule() {
-    if (!this._ruleDraft.name.trim()) {
+    const r = this._ruleDraft;
+    if (!r.name.trim()) {
       this._showToast("Enter a rule name");
+      return;
+    }
+    if (r.scope === "personal" && !r.kid_id) {
+      this._showToast("Select a child for this personal rule");
+      return;
+    }
+    if (r.target_mode === "passable_screen_time" && !r.screen_time_device_id) {
+      this._showToast("Select a Screen Time device");
+      return;
+    }
+    if (r.target_mode !== "passable_screen_time" && !r.target_entity) {
+      this._showToast("Select a target entity");
       return;
     }
     return this._runProtectedAction("settings", async () => {
       try {
-        const r = this._ruleDraft;
         await this.hass.callWS({
           type: `${ENGINE_DOMAIN}/save_unlock_rule`,
           rule_id: r.rule_id,
@@ -905,8 +919,8 @@ class PassableChoresCard extends LitElement {
           kid_id: r.scope === "personal" ? r.kid_id || null : null,
           shared_mode: r.shared_mode || "any_active_kid",
           target_mode: r.target_mode || "passable_screen_time",
-          screen_time_device_id: r.screen_time_device_id || null,
-          target_entity: r.target_entity || null,
+          screen_time_device_id: r.target_mode === "passable_screen_time" ? r.screen_time_device_id || null : null,
+          target_entity: r.target_mode !== "passable_screen_time" ? r.target_entity || null : null,
           nintendo_bonus_minutes: Number(r.nintendo_bonus_minutes) || 60,
           lock_on_reset: r.lock_on_reset !== false,
           re_lock_if_uncompleted: r.re_lock_if_uncompleted !== false,
@@ -935,13 +949,17 @@ class PassableChoresCard extends LitElement {
   }
 
   _saveReward() {
-    if (!this._rewardDraft.name.trim()) {
+    const d = this._rewardDraft;
+    if (!d.name.trim()) {
       this._showToast("Enter a reward name");
+      return;
+    }
+    if (d.reward_type === "smart_action" && d.action_kind === "nintendo_bonus" && !d.entity_id) {
+      this._showToast("Select a Nintendo Switch limit entity");
       return;
     }
     return this._runProtectedAction("settings", async () => {
       try {
-        const d = this._rewardDraft;
         const smartAction =
           d.reward_type === "smart_action"
             ? {
@@ -2056,6 +2074,33 @@ class PassableChoresCard extends LitElement {
     `;
   }
 
+  _renderQuickGuide(guideKey, title, summary, bullets, isEmpty = false) {
+    const isOpen = this._guideOpen?.[guideKey] !== undefined ? this._guideOpen[guideKey] : isEmpty;
+    return html`
+      <div class="guide-banner">
+        <button
+          type="button"
+          class="guide-header"
+          @click=${() => {
+            this._guideOpen = { ...(this._guideOpen || {}), [guideKey]: !isOpen };
+          }}
+        >
+          <div class="guide-title-wrap">
+            <span>💡 <strong>${title}:</strong> ${summary}</span>
+          </div>
+          <span class="guide-toggle">${isOpen ? "Hide ▴" : "Guide ▾"}</span>
+        </button>
+        ${isOpen
+          ? html`
+              <ul class="guide-bullets">
+                ${bullets.map((b) => html`<li>${b}</li>`)}
+              </ul>
+            `
+          : ""}
+      </div>
+    `;
+  }
+
   _renderTabContent() {
     if (this._modalTab === "chores") return this._renderChoresTab();
     if (this._modalTab === "kids") return this._renderKidsTab();
@@ -2070,9 +2115,22 @@ class PassableChoresCard extends LitElement {
     const filtered = chores.filter(
       (c) => this._choreFilterKid === "all" || (c.assigned_kids || []).includes(this._choreFilterKid)
     );
+    const defaultDueDay = (this._wsData?.cycle?.weekly_due_day || "sat").toUpperCase();
 
     return html`
       <div class="modal-tab-body">
+        ${this._renderQuickGuide(
+          "chores",
+          "Step 2 · Chores",
+          "Assign daily, school-day, weekend, or rotating weekly tasks.",
+          [
+            html`<strong>Required Chores</strong> unlock devices and earn daily 🔥 streaks + the all-done ⭐ bonus.`,
+            html`<strong>Flexible Weekly Chores</strong> show all week so kids can work ahead, and only block unlocks on/after the <em>Required-By Day</em> (${defaultDueDay}).`,
+            html`<strong>Bonus / Up for Grabs</strong> chores never block screen unlocks—anyone eligible can claim them for extra ⭐.`,
+          ],
+          chores.length === 0
+        )}
+
         ${this._choreFormOpen
           ? html`
               <div class="passable-section-card editor-card">
@@ -2150,11 +2208,11 @@ class PassableChoresCard extends LitElement {
                       .value=${d.schedule_type}
                       @change=${(ev) => (this._choreDraft = { ...d, schedule_type: ev.target.value })}
                     >
-                      <option value="daily">Daily</option>
-                      <option value="school_days">School Days (Mon–Fri)</option>
-                      <option value="weekends">Weekends (+ No-School)</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="custom_days">Custom Days</option>
+                      <option value="daily" ?selected=${d.schedule_type === "daily"}>Daily</option>
+                      <option value="school_days" ?selected=${d.schedule_type === "school_days"}>School Days (Mon–Fri)</option>
+                      <option value="weekends" ?selected=${d.schedule_type === "weekends"}>Weekends (+ No-School)</option>
+                      <option value="weekly" ?selected=${d.schedule_type === "weekly"}>Weekly</option>
+                      <option value="custom_days" ?selected=${d.schedule_type === "custom_days"}>Custom Days</option>
                     </select>
                   </div>
                   <div class="field-group">
@@ -2164,9 +2222,9 @@ class PassableChoresCard extends LitElement {
                       .value=${d.assignment_mode}
                       @change=${(ev) => (this._choreDraft = { ...d, assignment_mode: ev.target.value })}
                     >
-                      <option value="each">Each Selected Kid</option>
-                      <option value="rotate_weekly">Take Turns Weekly</option>
-                      <option value="up_for_grabs">Up for Grabs (Bonus)</option>
+                      <option value="each" ?selected=${d.assignment_mode === "each"}>Each Selected Kid</option>
+                      <option value="rotate_weekly" ?selected=${d.assignment_mode === "rotate_weekly"}>Take Turns Weekly</option>
+                      <option value="up_for_grabs" ?selected=${d.assignment_mode === "up_for_grabs"}>Up for Grabs (Bonus)</option>
                     </select>
                   </div>
                 </div>
@@ -2203,8 +2261,8 @@ class PassableChoresCard extends LitElement {
                             .value=${d.weekly_due_day || ""}
                             @change=${(ev) => (this._choreDraft = { ...d, weekly_due_day: ev.target.value })}
                           >
-                            <option value="">Default (${(this._wsData?.cycle?.weekly_due_day || "sat").toUpperCase()})</option>
-                            ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
+                            <option value="" ?selected=${!(d.weekly_due_day || "")}>Default (${defaultDueDay})</option>
+                            ${DAYS_LIST.map((day) => html`<option value="${day}" ?selected=${d.weekly_due_day === day}>${day.toUpperCase()}</option>`)}
                           </select>
                         </div>
                         <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
@@ -2227,8 +2285,8 @@ class PassableChoresCard extends LitElement {
                       .value=${d.tier}
                       @change=${(ev) => (this._choreDraft = { ...d, tier: ev.target.value })}
                     >
-                      <option value="required">Required (Gates Unlocks)</option>
-                      <option value="bonus">Bonus (Extra Stars)</option>
+                      <option value="required" ?selected=${d.tier === "required"}>Required (Gates Unlocks)</option>
+                      <option value="bonus" ?selected=${d.tier === "bonus"}>Bonus (Extra Stars)</option>
                     </select>
                   </div>
                   <div class="field-group">
@@ -2285,9 +2343,9 @@ class PassableChoresCard extends LitElement {
                             .value=${d.trust_mode}
                             @change=${(ev) => (this._choreDraft = { ...d, trust_mode: ev.target.value })}
                           >
-                            <option value="inherit">Inherit Kid / Global Default</option>
-                            <option value="honor_system">Always Honor System</option>
-                            <option value="parent_approval">Always Parent Approval</option>
+                            <option value="inherit" ?selected=${d.trust_mode === "inherit"}>Inherit Kid / Global Default</option>
+                            <option value="honor_system" ?selected=${d.trust_mode === "honor_system"}>Always Honor System</option>
+                            <option value="parent_approval" ?selected=${d.trust_mode === "parent_approval"}>Always Parent Approval</option>
                           </select>
                         </div>
                         <div class="field-group">
@@ -2321,8 +2379,8 @@ class PassableChoresCard extends LitElement {
                 @change=${(ev) => (this._choreFilterKid = ev.target.value)}
                 aria-label="Filter chores by child"
               >
-                <option value="all">All Kids</option>
-                ${kids.map((k) => html`<option value="${k.kid_id}">${k.avatar} ${k.name}</option>`)}
+                <option value="all" ?selected=${this._choreFilterKid === "all"}>All Kids</option>
+                ${kids.map((k) => html`<option value="${k.kid_id}" ?selected=${this._choreFilterKid === k.kid_id}>${k.avatar} ${k.name}</option>`)}
               </select>
             </div>
             <div class="drawer-actions">
@@ -2405,6 +2463,18 @@ class PassableChoresCard extends LitElement {
     const k = this._kidDraft;
     return html`
       <div class="modal-tab-body">
+        ${this._renderQuickGuide(
+          "kids",
+          "Step 1 · Kids & Trust",
+          "Create child profiles and choose instant completion or parent approval.",
+          [
+            html`<strong>Honor System:</strong> Tapping a chore finishes it right away (with a 15s tap-again undo window) and awards ⭐.`,
+            html`<strong>Parent Approval:</strong> Tapping marks it ⏳ Waiting and alerts parent phones with <em>Approve / Try Again</em> before awarding ⭐ or unlocking screens.`,
+            html`<strong>Board Visibility:</strong> Kids with 0 chores scheduled today stay hidden on the card until assigned (or toggle <em>Hide Kids With 0 Chores</em> in Card Settings).`,
+          ],
+          kids.length === 0
+        )}
+
         ${this._kidFormOpen
           ? html`
               <div class="passable-section-card editor-card">
@@ -2491,9 +2561,9 @@ class PassableChoresCard extends LitElement {
                       .value=${k.trust_mode}
                       @change=${(ev) => (this._kidDraft = { ...k, trust_mode: ev.target.value })}
                     >
-                      <option value="inherit">Inherit Global Setting</option>
-                      <option value="honor_system">Honor System (Instant)</option>
-                      <option value="parent_approval">Require Parent Approval</option>
+                      <option value="inherit" ?selected=${k.trust_mode === "inherit"}>Inherit Global Setting</option>
+                      <option value="honor_system" ?selected=${k.trust_mode === "honor_system"}>Honor System (Instant)</option>
+                      <option value="parent_approval" ?selected=${k.trust_mode === "parent_approval"}>Require Parent Approval</option>
                     </select>
                   </div>
                   <div class="switch-control-row" style="align-self:end;padding-bottom:6px;">
@@ -2573,8 +2643,46 @@ class PassableChoresCard extends LitElement {
     const rules = this._wsData?.unlock_rules || [];
     const rewards = this._wsData?.rewards || [];
     const cands = this._wsData?.candidates || {};
+    const stDevices = cands.screen_time_devices || [];
     const r = this._ruleDraft;
     const rw = this._rewardDraft;
+
+    const scopeHelp =
+      r.scope === "personal"
+        ? "Unlocks when this specific child finishes 100% of their required chores due today."
+        : "Unlocks a shared device (like a living room TV) when either the first active child finishes or all kids with chores today finish.";
+
+    const targetModeHelp = {
+      passable_screen_time:
+        "Recommended: Calls Passable Screen Time Engine (set_lockout) to pause Wi-Fi or lock TVs, and waits until morning if downtime/bedtime is active.",
+      lockout_switch:
+        "Directly flips a standalone switch entity where ON = blocked/paused and OFF = allowed (for switches not in Screen Time Engine).",
+      power_switch:
+        "Directly turns a smart plug or media_player OFF while locked and ON when chores finish.",
+      nintendo_switch:
+        "Sets a Nintendo Switch parental-control daily limit entity to 0 min while locked, then restores your chosen minutes when unlocked.",
+    }[r.target_mode] || "";
+
+    const getFriendlyTargetName = (rule) => {
+      const mode = rule.target_mode || "passable_screen_time";
+      if (mode === "passable_screen_time") {
+        if (!rule.screen_time_device_id) return null;
+        if (rule.screen_time_device_id === "all") return "All Screen Time Devices";
+        return stDevices.find((d) => d.device_id === rule.screen_time_device_id)?.name || rule.screen_time_device_id;
+      }
+      if (!rule.target_entity) return null;
+      const pool = mode === "nintendo_switch" ? cands.nintendo_numbers || [] : cands.switches || [];
+      return pool.find((e) => e.entity_id === rule.target_entity)?.name || rule.target_entity;
+    };
+
+    const getFriendlyScopeLabel = (rule) => {
+      if (rule.scope === "personal") {
+        if (!rule.kid_id) return "Personal (No child selected)";
+        const kname = kids.find((kid) => kid.kid_id === rule.kid_id)?.name || rule.kid_id;
+        return `Personal (${kname})`;
+      }
+      return rule.shared_mode === "all_active_kids" ? "Shared (All active kids)" : "Shared (Any active kid)";
+    };
 
     return html`
       <div class="modal-tab-body">
@@ -2593,6 +2701,18 @@ class PassableChoresCard extends LitElement {
 
         ${this._unlocksSubTab === "unlocks"
           ? html`
+              ${this._renderQuickGuide(
+                "unlocks",
+                "Step 3 · Screen Unlocks",
+                "Automatically lock tablets, TVs, or switches until required chores are 100% done.",
+                [
+                  html`<strong>Auto-Lock & Unlock:</strong> Locks at morning reset (and right when saved if chores are incomplete today), then unlocks as soon as required chores reach 100%.`,
+                  html`<strong>0-Chore Safeguard & Latch:</strong> Kids with 0 chores today are ignored. Unlocks happen once per day so manual evening locks won't be overwritten.`,
+                  html`<strong>Passable Screen Time Engine:</strong> Best choice for tablets/TVs already managed there—it handles anti-bypass and respects bedtime downtime automatically.`,
+                ],
+                rules.length === 0
+              )}
+
               ${this._ruleFormOpen
                 ? html`
                     <div class="passable-section-card editor-card">
@@ -2614,7 +2734,7 @@ class PassableChoresCard extends LitElement {
                           <input
                             class="field-input"
                             type="text"
-                            placeholder="e.g. Living Room TV"
+                            placeholder="e.g. Madeleine's Tablet"
                             .value=${r.name}
                             @input=${(ev) => (this._ruleDraft = { ...r, name: ev.target.value })}
                           />
@@ -2626,11 +2746,13 @@ class PassableChoresCard extends LitElement {
                             .value=${r.scope}
                             @change=${(ev) => (this._ruleDraft = { ...r, scope: ev.target.value })}
                           >
-                            <option value="shared">Shared Family Device</option>
-                            <option value="personal">Personal Child Device</option>
+                            <option value="shared" ?selected=${r.scope === "shared"}>Shared Family Device</option>
+                            <option value="personal" ?selected=${r.scope === "personal"}>Personal Child Device</option>
                           </select>
                         </div>
                       </div>
+
+                      <div class="field-help">${scopeHelp}</div>
 
                       ${r.scope === "personal"
                         ? html`
@@ -2638,11 +2760,11 @@ class PassableChoresCard extends LitElement {
                               <label class="field-label">Child</label>
                               <select
                                 class="field-input"
-                                .value=${r.kid_id}
+                                .value=${r.kid_id || ""}
                                 @change=${(ev) => (this._ruleDraft = { ...r, kid_id: ev.target.value })}
                               >
-                                <option value="">Select Child...</option>
-                                ${kids.map((kid) => html`<option value="${kid.kid_id}">${kid.avatar} ${kid.name}</option>`)}
+                                <option value="" ?selected=${!r.kid_id}>Select Child...</option>
+                                ${kids.map((kid) => html`<option value="${kid.kid_id}" ?selected=${r.kid_id === kid.kid_id}>${kid.avatar} ${kid.name}</option>`)}
                               </select>
                             </div>
                           `
@@ -2654,8 +2776,8 @@ class PassableChoresCard extends LitElement {
                                 .value=${r.shared_mode}
                                 @change=${(ev) => (this._ruleDraft = { ...r, shared_mode: ev.target.value })}
                               >
-                                <option value="any_active_kid">Any Active Kid Finishes</option>
-                                <option value="all_active_kids">All Active Kids Finish</option>
+                                <option value="any_active_kid" ?selected=${r.shared_mode === "any_active_kid"}>Any Active Kid Finishes</option>
+                                <option value="all_active_kids" ?selected=${r.shared_mode === "all_active_kids"}>All Active Kids Finish</option>
                               </select>
                             </div>
                           `}
@@ -2668,10 +2790,10 @@ class PassableChoresCard extends LitElement {
                             .value=${r.target_mode}
                             @change=${(ev) => (this._ruleDraft = { ...r, target_mode: ev.target.value })}
                           >
-                            <option value="passable_screen_time">Passable Screen Time Engine</option>
-                            <option value="lockout_switch">Lockout Switch (ON = Locked)</option>
-                            <option value="power_switch">Power Switch / TV (OFF = Locked)</option>
-                            <option value="nintendo_switch">Nintendo Switch Max Time</option>
+                            <option value="passable_screen_time" ?selected=${r.target_mode === "passable_screen_time"}>Passable Screen Time Engine</option>
+                            <option value="lockout_switch" ?selected=${r.target_mode === "lockout_switch"}>Lockout Switch (ON = Locked)</option>
+                            <option value="power_switch" ?selected=${r.target_mode === "power_switch"}>Power Switch / TV (OFF = Locked)</option>
+                            <option value="nintendo_switch" ?selected=${r.target_mode === "nintendo_switch"}>Nintendo Switch Max Time</option>
                           </select>
                         </div>
 
@@ -2681,13 +2803,13 @@ class PassableChoresCard extends LitElement {
                                 <label class="field-label">Screen Time Device</label>
                                 <select
                                   class="field-input"
-                                  .value=${r.screen_time_device_id}
+                                  .value=${r.screen_time_device_id || ""}
                                   @change=${(ev) => (this._ruleDraft = { ...r, screen_time_device_id: ev.target.value })}
                                 >
-                                  <option value="">Select Device...</option>
-                                  <option value="all">All Screen Time Devices</option>
-                                  ${(cands.screen_time_devices || []).map(
-                                    (dev) => html`<option value="${dev.device_id}">${dev.name}</option>`
+                                  <option value="" ?selected=${!r.screen_time_device_id}>Select Device...</option>
+                                  <option value="all" ?selected=${r.screen_time_device_id === "all"}>All Screen Time Devices</option>
+                                  ${stDevices.map(
+                                    (dev) => html`<option value="${dev.device_id}" ?selected=${r.screen_time_device_id === dev.device_id}>${dev.name}</option>`
                                   )}
                                 </select>
                               </div>
@@ -2697,17 +2819,35 @@ class PassableChoresCard extends LitElement {
                                 <label class="field-label">Target Entity</label>
                                 <select
                                   class="field-input"
-                                  .value=${r.target_entity}
+                                  .value=${r.target_entity || ""}
                                   @change=${(ev) => (this._ruleDraft = { ...r, target_entity: ev.target.value })}
                                 >
-                                  <option value="">Select Entity...</option>
-                                  ${(r.target_mode === "nintendo_switch" ? cands.nintendo_numbers : cands.switches || []).map(
-                                    (ent) => html`<option value="${ent.entity_id}">${ent.name}</option>`
+                                  <option value="" ?selected=${!r.target_entity}>Select Entity...</option>
+                                  ${((r.target_mode === "nintendo_switch" ? cands.nintendo_numbers : cands.switches) || []).map(
+                                    (ent) => html`<option value="${ent.entity_id}" ?selected=${r.target_entity === ent.entity_id}>${ent.name}</option>`
                                   )}
                                 </select>
                               </div>
                             `}
                       </div>
+
+                      ${targetModeHelp ? html`<div class="field-help">${targetModeHelp}</div>` : ""}
+
+                      ${r.target_mode === "nintendo_switch"
+                        ? html`
+                            <div class="field-group">
+                              <label class="field-label">Unlocked Daily Limit (Minutes)</label>
+                              <input
+                                class="field-input"
+                                type="number"
+                                min="5"
+                                max="480"
+                                .value=${String(r.nintendo_bonus_minutes || 60)}
+                                @input=${(ev) => (this._ruleDraft = { ...r, nintendo_bonus_minutes: Number(ev.target.value) })}
+                              />
+                            </div>
+                          `
+                        : ""}
 
                       <div class="switch-control-row">
                         <span class="switch-sub">Lock on morning reset & respect Screen Time bedtime schedules</span>
@@ -2742,15 +2882,29 @@ class PassableChoresCard extends LitElement {
                     : ""}
                 </div>
                 ${rules.length === 0
-                  ? html`<div class="muted-hint">Tap "+ Add Rule" to unlock TVs, tablets, or switches when chores are done.</div>`
-                  : rules.map(
-                      (rule) => html`
+                  ? html`<div class="muted-hint">Tap "+ Add Rule" to lock tablets, TVs, or consoles each morning until required chores are complete.</div>`
+                  : rules.map((rule) => {
+                      const targetName = getFriendlyTargetName(rule);
+                      const missingKid = rule.scope === "personal" && !rule.kid_id;
+                      const isIncomplete = missingKid || !targetName;
+                      const isLocked = rule.is_currently_locked !== false;
+                      return html`
                         <div class="drawer-row">
                           <div class="drawer-row-left">
-                            <ha-icon icon="${rule.is_currently_locked === false ? "mdi:lock-open-variant" : "mdi:lock"}" style="--mdc-icon-size:18px;color:${rule.is_currently_locked === false ? "#16a34a" : "#d97706"};"></ha-icon>
+                            <ha-icon
+                              icon="${isIncomplete ? "mdi:alert-circle-outline" : isLocked ? "mdi:lock" : "mdi:lock-open-variant"}"
+                              style="--mdc-icon-size:18px;color:${isIncomplete ? "#ef4444" : isLocked ? "#d97706" : "#16a34a"};"
+                            ></ha-icon>
                             <div>
                               <div class="drawer-row-title">${rule.name}</div>
-                              <div class="drawer-row-sub">${rule.scope === "personal" ? `Personal (${rule.kid_id})` : `Shared (${rule.shared_mode})`} · ${rule.screen_time_device_id || rule.target_entity || "Unbound"}</div>
+                              <div class="drawer-row-sub">
+                                ${getFriendlyScopeLabel(rule)} · ${targetName || "No device selected"}
+                                ${isIncomplete
+                                  ? html` · <span style="color:#ef4444;font-weight:700;">Tap ✏️ to select ${missingKid ? "Child" : "Device"}</span>`
+                                  : rule.status_reason
+                                    ? ` · ${isLocked ? "Locked" : "Unlocked"} (${rule.status_reason})`
+                                    : ""}
+                              </div>
                             </div>
                           </div>
                           <div class="drawer-actions">
@@ -2758,18 +2912,36 @@ class PassableChoresCard extends LitElement {
                               type="button"
                               class="icon-mini-btn"
                               @click=${() => {
-                                this._ruleDraft = { ...rule, kid_id: rule.kid_id || "", screen_time_device_id: rule.screen_time_device_id || "", target_entity: rule.target_entity || "" };
+                                this._ruleDraft = {
+                                  ...this._emptyRuleDraft(),
+                                  ...rule,
+                                  kid_id: rule.kid_id || "",
+                                  screen_time_device_id: rule.screen_time_device_id || "",
+                                  target_entity: rule.target_entity || "",
+                                };
                                 this._ruleFormOpen = true;
                               }}
+                              title="Edit"
                             ><ha-icon icon="mdi:pencil-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
-                            <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteUnlockRule(rule.rule_id)}><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
+                            <button type="button" class="icon-mini-btn danger" @click=${() => this._deleteUnlockRule(rule.rule_id)} title="Delete"><ha-icon icon="mdi:trash-can-outline" style="--mdc-icon-size:15px;"></ha-icon></button>
                           </div>
                         </div>
-                      `
-                    )}
+                      `;
+                    })}
               </div>
             `
           : html`
+              ${this._renderQuickGuide(
+                "rewards",
+                "Optional · Rewards Shop",
+                "Let kids spend earned ⭐ stars in the main card's 🎁 Rewards drawer.",
+                [
+                  html`<strong>Parent-Fulfilled:</strong> Deducts stars into ⏳ Waiting and sends an <em>Approve / Refund</em> push alert (denying refunds 100% of stars).`,
+                  html`<strong>Smart Home Auto-Reward:</strong> Deducts stars and immediately starts a Screen Time viewing timer, adds bonus minutes, or adds Nintendo Switch time.`,
+                ],
+                rewards.length === 0
+              )}
+
               ${this._rewardFormOpen
                 ? html`
                     <div class="passable-section-card editor-card">
@@ -2810,8 +2982,8 @@ class PassableChoresCard extends LitElement {
                         <div class="field-group">
                           <label class="field-label">Reward Type</label>
                           <select class="field-input" .value=${rw.reward_type} @change=${(ev) => (this._rewardDraft = { ...rw, reward_type: ev.target.value })}>
-                            <option value="parent_fulfilled">Parent-Fulfilled (Push Alert)</option>
-                            <option value="smart_action">Smart Home Auto-Reward</option>
+                            <option value="parent_fulfilled" ?selected=${rw.reward_type === "parent_fulfilled"}>Parent-Fulfilled (Push Alert)</option>
+                            <option value="smart_action" ?selected=${rw.reward_type === "smart_action"}>Smart Home Auto-Reward</option>
                           </select>
                         </div>
                       </div>
@@ -2822,9 +2994,9 @@ class PassableChoresCard extends LitElement {
                               <div class="field-group">
                                 <label class="field-label">Smart Action</label>
                                 <select class="field-input" .value=${rw.action_kind} @change=${(ev) => (this._rewardDraft = { ...rw, action_kind: ev.target.value })}>
-                                  <option value="screen_time_timer">Screen Time Viewing Timer</option>
-                                  <option value="screen_time_bonus">Screen Time +Daily Bonus</option>
-                                  <option value="nintendo_bonus">Nintendo Switch +Minutes</option>
+                                  <option value="screen_time_timer" ?selected=${rw.action_kind === "screen_time_timer"}>Screen Time Viewing Timer</option>
+                                  <option value="screen_time_bonus" ?selected=${rw.action_kind === "screen_time_bonus"}>Screen Time +Daily Bonus</option>
+                                  <option value="nintendo_bonus" ?selected=${rw.action_kind === "nintendo_bonus"}>Nintendo Switch +Minutes</option>
                                 </select>
                               </div>
                               <div class="field-group">
@@ -2837,8 +3009,8 @@ class PassableChoresCard extends LitElement {
                                   <div class="field-group">
                                     <label class="field-label">Nintendo Switch Limit Entity</label>
                                     <select class="field-input" .value=${rw.entity_id || ""} @change=${(ev) => (this._rewardDraft = { ...rw, entity_id: ev.target.value })}>
-                                      <option value="">Select Entity...</option>
-                                      ${(cands.nintendo_numbers || []).map((ent) => html`<option value="${ent.entity_id}">${ent.name}</option>`)}
+                                      <option value="" ?selected=${!(rw.entity_id || "")}>Select Entity...</option>
+                                      ${(cands.nintendo_numbers || []).map((ent) => html`<option value="${ent.entity_id}" ?selected=${rw.entity_id === ent.entity_id}>${ent.name}</option>`)}
                                     </select>
                                   </div>
                                 `
@@ -2846,8 +3018,8 @@ class PassableChoresCard extends LitElement {
                                   <div class="field-group">
                                     <label class="field-label">Target Screen Time Device</label>
                                     <select class="field-input" .value=${rw.device_id || "all"} @change=${(ev) => (this._rewardDraft = { ...rw, device_id: ev.target.value })}>
-                                      <option value="all">All Screen Time Devices</option>
-                                      ${(cands.screen_time_devices || []).map((dev) => html`<option value="${dev.device_id}">${dev.name}</option>`)}
+                                      <option value="all" ?selected=${(rw.device_id || "all") === "all"}>All Screen Time Devices</option>
+                                      ${stDevices.map((dev) => html`<option value="${dev.device_id}" ?selected=${rw.device_id === dev.device_id}>${dev.name}</option>`)}
                                     </select>
                                   </div>
                                 `}
@@ -2955,6 +3127,18 @@ class PassableChoresCard extends LitElement {
               </div>
             `
           : html`
+              ${this._renderQuickGuide(
+                "setup",
+                "Schedules, Alerts & PIN",
+                "Configure daily resets, school calendars, mobile approvals, and wall-tablet PINs.",
+                [
+                  html`<strong>Daily Reset Time:</strong> Clears daily completions and re-locks chore-gated devices each morning (default 05:00).`,
+                  html`<strong>No-School Calendars:</strong> Automatically pauses School-Day chores and turns on Weekend chores on holidays.`,
+                  html`<strong>Parent Push & PIN:</strong> Choose mobile notify targets for Approve/Try Again phone buttons, and set a 4–6 digit PIN for kiosks.`,
+                ],
+                false
+              )}
+
               <div class="passable-section-card">
                 <div class="passable-section-header">
                   <span class="passable-section-title">Schedules & Trust Mode</span>
@@ -2978,8 +3162,8 @@ class PassableChoresCard extends LitElement {
                       .value=${settings.default_trust_mode || "honor_system"}
                       @change=${(ev) => this._saveSettingsPatch({ default_trust_mode: ev.target.value })}
                     >
-                      <option value="honor_system">Honor System (Instant)</option>
-                      <option value="parent_approval">Parent Approval Required</option>
+                      <option value="honor_system" ?selected=${(settings.default_trust_mode || "honor_system") === "honor_system"}>Honor System (Instant)</option>
+                      <option value="parent_approval" ?selected=${settings.default_trust_mode === "parent_approval"}>Parent Approval Required</option>
                     </select>
                   </div>
                 </div>
@@ -2992,7 +3176,7 @@ class PassableChoresCard extends LitElement {
                       .value=${settings.weekly_reset_day || "mon"}
                       @change=${(ev) => this._saveSettingsPatch({ weekly_reset_day: ev.target.value })}
                     >
-                      ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
+                      ${DAYS_LIST.map((day) => html`<option value="${day}" ?selected=${(settings.weekly_reset_day || "mon") === day}>${day.toUpperCase()}</option>`)}
                     </select>
                   </div>
                   <div class="field-group">
@@ -3002,7 +3186,7 @@ class PassableChoresCard extends LitElement {
                       .value=${settings.weekly_due_day || "sat"}
                       @change=${(ev) => this._saveSettingsPatch({ weekly_due_day: ev.target.value })}
                     >
-                      ${DAYS_LIST.map((day) => html`<option value="${day}">${day.toUpperCase()}</option>`)}
+                      ${DAYS_LIST.map((day) => html`<option value="${day}" ?selected=${(settings.weekly_due_day || "sat") === day}>${day.toUpperCase()}</option>`)}
                     </select>
                   </div>
                 </div>
@@ -3616,6 +3800,26 @@ class PassableChoresCard extends LitElement {
       .passable-section-title { font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
       .editor-card { border-color: rgba(2, 132, 199, 0.35); background: rgba(2, 132, 199, 0.05); }
       .muted-hint { margin: 0; font-size: 12px; color: var(--secondary-text-color); }
+      .guide-banner {
+        border-radius: 13px; border: 1px solid rgba(14, 165, 233, 0.28);
+        background: rgba(14, 165, 233, 0.08); overflow: hidden;
+      }
+      .guide-header {
+        width: 100%; background: none; border: none; padding: 8px 11px;
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        text-align: left; color: var(--primary-text-color); font-family: inherit;
+        font-size: 12px; line-height: 1.35; cursor: pointer;
+      }
+      .guide-title-wrap { flex: 1; min-width: 0; }
+      .guide-toggle { font-size: 11.5px; font-weight: 700; color: var(--primary-color, #0284c7); white-space: nowrap; }
+      .guide-bullets {
+        margin: 0; padding: 0 12px 9px 26px; display: flex; flex-direction: column; gap: 4px;
+        font-size: 11.5px; line-height: 1.4; color: var(--secondary-text-color);
+      }
+      .field-help {
+        font-size: 11.5px; line-height: 1.38; color: var(--secondary-text-color);
+        padding: 5px 8px; border-radius: 8px; background: rgba(128, 128, 128, 0.09);
+      }
       .two-col-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
       .icon-name-row { display: grid; grid-template-columns: 62px 1fr; gap: 8px; align-items: end; }
       .field-group { display: flex; flex-direction: column; gap: 4px; position: relative; }
@@ -3823,26 +4027,26 @@ class PassableChoresCardEditor extends LitElement {
           <div class="form-group">
             <label class="form-label">Display Mode</label>
             <select class="custom-select" .value=${c.display_mode || "summary"} @change=${(ev) => this._updateConfig({ display_mode: ev.target.value })}>
-              <option value="summary">Summary Card + Popup Command Center (Recommended)</option>
-              <option value="full">Full Embedded Command Center</option>
+              <option value="summary" ?selected=${(c.display_mode || "summary") === "summary"}>Summary Card + Popup Command Center (Recommended)</option>
+              <option value="full" ?selected=${c.display_mode === "full"}>Full Embedded Command Center</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label">Layout Style</label>
             <select class="custom-select" .value=${c.layout || "board"} @change=${(ev) => this._updateConfig({ layout: ev.target.value })}>
-              <option value="board">Kid Columns Board (Recommended)</option>
-              <option value="tiles">Compact 2-Column Kid Tiles</option>
-              <option value="rows">Stacked Kid Rows</option>
-              <option value="rings">Circular Progress Rings</option>
+              <option value="board" ?selected=${(c.layout || "board") === "board"}>Kid Columns Board (Recommended)</option>
+              <option value="tiles" ?selected=${c.layout === "tiles"}>Compact 2-Column Kid Tiles</option>
+              <option value="rows" ?selected=${c.layout === "rows"}>Stacked Kid Rows</option>
+              <option value="rings" ?selected=${c.layout === "rings"}>Circular Progress Rings</option>
             </select>
           </div>
 
           <div class="form-group">
             <label class="form-label">Chore Tile Size</label>
             <select class="custom-select" .value=${c.tile_size || "large"} @change=${(ev) => this._updateConfig({ tile_size: ev.target.value })}>
-              <option value="large">Large Picture / Emoji Tiles (Kid-Friendly)</option>
-              <option value="compact">Compact Rows</option>
+              <option value="large" ?selected=${(c.tile_size || "large") === "large"}>Large Picture / Emoji Tiles (Kid-Friendly)</option>
+              <option value="compact" ?selected=${c.tile_size === "compact"}>Compact Rows</option>
             </select>
           </div>
 
@@ -3876,9 +4080,9 @@ class PassableChoresCardEditor extends LitElement {
                 this._updateConfig({ require_pin: v === "true" ? true : v === "false" ? false : "auto" });
               }}
             >
-              <option value="auto">Auto (Use Integration PIN Settings)</option>
-              <option value="true">Always Enforce on This Card</option>
-              <option value="false">Bypass on This Card (Trusted Parent View)</option>
+              <option value="auto" ?selected=${String(c.require_pin ?? "auto") === "auto"}>Auto (Use Integration PIN Settings)</option>
+              <option value="true" ?selected=${String(c.require_pin ?? "auto") === "true"}>Always Enforce on This Card</option>
+              <option value="false" ?selected=${String(c.require_pin ?? "auto") === "false"}>Bypass on This Card (Trusted Parent View)</option>
             </select>
           </div>
 
@@ -3892,10 +4096,10 @@ class PassableChoresCardEditor extends LitElement {
                 this._updateConfig({ admin_visibility: val, hide_admin_setup: val === "hidden" });
               }}
             >
-              <option value="everyone">Everyone</option>
-              <option value="admins_only">Home Assistant Admins Only</option>
-              <option value="selected_users">Selected Users Only</option>
-              <option value="hidden">Hidden (Always Kiosk)</option>
+              <option value="everyone" ?selected=${adminVis === "everyone"}>Everyone</option>
+              <option value="admins_only" ?selected=${adminVis === "admins_only"}>Home Assistant Admins Only</option>
+              <option value="selected_users" ?selected=${adminVis === "selected_users"}>Selected Users Only</option>
+              <option value="hidden" ?selected=${adminVis === "hidden"}>Hidden (Always Kiosk)</option>
             </select>
           </div>
 
